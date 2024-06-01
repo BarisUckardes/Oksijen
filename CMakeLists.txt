@@ -30,5 +30,6 @@ add_subdirectory("Samples/01_RedBlueAlternating")
 add_subdirectory("Samples/02_HelloTriangle")
 add_subdirectory("Samples/03_TexturedQuad")
 add_subdirectory("Samples/04_RotatingCube")
+add_subdirectory("Samples/05_NaiveInstancing")
 
 # --------------------------------------------------
