@@ -6,11 +6,10 @@
 namespace Oksijen
 {
 	
-	Swapchain::Swapchain(const Surface* pSurface,GraphicsQueue* pQueue,const GraphicsDevice* pDevice, const unsigned int bufferCount, const unsigned int width, const unsigned int height, const VkPresentModeKHR presentMode, const VkFormat format, const VkColorSpaceKHR formatColorspace, const VkImageUsageFlags imageUsageFlags) :
-		mLogicalDevice(pDevice->GetLogicalDevice()),mTargetQueue(pQueue), mSwapchain(VK_NULL_HANDLE), mBufferCount(bufferCount), mWidth(width), mHeight(height), mPresentMode(presentMode), mFormat(format), mFormatColorSpace(formatColorspace), mImageUsageFlags(imageUsageFlags), mSurface(pSurface->GetSurface())
+	Swapchain::Swapchain(const Surface* pSurface,GraphicsQueue* pQueue,const GraphicsDevice* pDevice, const unsigned int bufferCount, const unsigned int width, const unsigned int height,const unsigned int arrayLevels, const VkPresentModeKHR presentMode, const VkFormat format, const VkColorSpaceKHR formatColorspace, const VkImageUsageFlags imageUsageFlags) :
+		mLogicalDevice(pDevice->GetLogicalDevice()),mTargetQueue(pQueue), mSwapchain(VK_NULL_HANDLE), mBufferCount(bufferCount), mWidth(width), mHeight(height),mArrayLevels(arrayLevels), mPresentMode(presentMode), mFormat(format), mFormatColorSpace(formatColorspace), mImageUsageFlags(imageUsageFlags), mSurface(pSurface->GetSurface())
 	{
 		ResizeInternal();
-
 	}
 	Swapchain::~Swapchain()
 	{
@@ -19,16 +18,11 @@ namespace Oksijen
 	void Swapchain::Resize(const unsigned int width, const unsigned int height)
 	{
 		//Cleanup former images/buffers
-		for (const VkImageView view : mViews)
-		{
-			vkDestroyImageView(mLogicalDevice, view, nullptr);
-		}
 		for (Texture* pTexture : mTextures)
 		{
 			delete pTexture;
 		}
 		mTextures.clear();
-		mViews.clear();
 
 		//Set new properties
 		mWidth = width;
@@ -68,7 +62,7 @@ namespace Oksijen
 		swapchainInfo.imageFormat = mFormat;
 		swapchainInfo.imageColorSpace = mFormatColorSpace;
 		swapchainInfo.imageExtent = { mWidth,mHeight };
-		swapchainInfo.imageArrayLayers = 1;
+		swapchainInfo.imageArrayLayers = mArrayLevels;
 		swapchainInfo.imageUsage = mImageUsageFlags;
 		swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 		swapchainInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
@@ -92,31 +86,6 @@ namespace Oksijen
 		for (const VkImage image : images)
 		{
 			mTextures.push_back(new Texture(image));
-		}
-
-		//Create views
-		for (const VkImage image : images)
-		{
-			VkImageViewCreateInfo info = {};
-			info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-			info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-			info.image = image;
-			info.format = mFormat;
-			info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			info.subresourceRange.baseArrayLayer = 0;
-			info.subresourceRange.baseMipLevel = 0;
-			info.subresourceRange.layerCount = 1;
-			info.subresourceRange.levelCount = 1;
-			info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-			info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-			info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-			info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-			info.flags = VkImageViewCreateFlags();
-			info.pNext = nullptr;
-
-			VkImageView view = VK_NULL_HANDLE;
-			DEV_ASSERT(vkCreateImageView(mLogicalDevice, &info, nullptr, &view) == VK_SUCCESS, "Swapchain", "Failed to create image view");
-			mViews.push_back(view);
 		}
 	}
 }

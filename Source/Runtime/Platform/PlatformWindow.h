@@ -30,7 +30,7 @@ namespace Oksijen
 		void Show();
 		void Hide();
 	protected:
-		PlatformWindow(const WindowDesc& desc) : mTitle(desc.Title), mX(desc.X), mY(desc.Y), mWidth(desc.Width), mHeight(desc.Height), mVisible(false), mActive(true)
+		PlatformWindow(const WindowDesc& desc) : mTitle(desc.Title), mX(desc.X), mY(desc.Y), mWidth(desc.Width), mHeight(desc.Height), mVisible(false), mActive(true),mMode(WindowMode::Fixed)
 		{
 
 		}

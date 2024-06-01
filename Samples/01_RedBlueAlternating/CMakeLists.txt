@@ -5,8 +5,8 @@ include(${CMAKE_SOURCE_DIR}/Scripts/CMake/FetchLibraries.cmake)
 # ------------------------------------------------------------
 
 # ---------------------- FILE ADDITION -----------------------
-file(GLOB_RECURSE SUBDIRECTORIES "${CMAKE_SOURCE_DIR}/Samples/RedBlueAlternating/**.cpp" "${CMAKE_SOURCE_DIR}/Samples/RedBlueAlternating/**.h")
-source_group(TREE "${CMAKE_SOURCE_DIR}/Samples/RedBlueAlternating" FILES ${SUBDIRECTORIES})
+file(GLOB_RECURSE SUBDIRECTORIES "${CMAKE_SOURCE_DIR}/Samples/01_RedBlueAlternating/**.cpp" "${CMAKE_SOURCE_DIR}/Samples/01_RedBlueAlternating/**.h")
+source_group(TREE "${CMAKE_SOURCE_DIR}/Samples/01_RedBlueAlternating" FILES ${SUBDIRECTORIES})
 add_executable(RedBlueAlternating main.cpp ${SUBDIRECTORIES})
 # ------------------------------------------------------------
 

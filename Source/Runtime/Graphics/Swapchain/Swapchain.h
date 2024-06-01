@@ -16,11 +16,11 @@ namespace Oksijen
 	{
 		friend class GraphicsDevice;
 	public:
-		Swapchain(const Surface* pSurface,GraphicsQueue* pQueue,const GraphicsDevice* pDevice,const unsigned int bufferCount,const unsigned int width,const unsigned int height,const VkPresentModeKHR presentMode,const VkFormat format,const VkColorSpaceKHR formatColorspace,const VkImageUsageFlags imageUsageFlags);
+		Swapchain(const Surface* pSurface,GraphicsQueue* pQueue,const GraphicsDevice* pDevice,const unsigned int bufferCount,const unsigned int width,const unsigned int height,const unsigned int arrayLevels,const VkPresentModeKHR presentMode,const VkFormat format,const VkColorSpaceKHR formatColorspace,const VkImageUsageFlags imageUsageFlags);
 		~Swapchain();
 
 		FORCEINLINE Texture* GetTexture(const unsigned int index) { return mTextures[index]; }
-		FORCEINLINE VkImageView GetImageView(const unsigned int index) { return mViews[index]; }
+		FORCEINLINE VkImageView GetImageView(const unsigned int index) { return VK_NULL_HANDLE; }
 
 		void Resize(const unsigned int width, const unsigned int height);
 		unsigned int AcquireImageIndex(const Fence* pFence,const Semaphore* pSemaphore);
@@ -35,12 +35,12 @@ namespace Oksijen
 		const VkFormat mFormat;
 		const VkColorSpaceKHR mFormatColorSpace;
 		const VkImageUsageFlags mImageUsageFlags;
+		const unsigned int mArrayLevels;
 		GraphicsQueue* mTargetQueue;
 		VkSwapchainKHR mSwapchain;
 		unsigned int mWidth;
 		unsigned int mHeight;
 		std::vector<Texture*> mTextures;
-		std::vector<VkImageView> mViews;
 
 	};
 }

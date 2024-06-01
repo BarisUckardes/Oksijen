@@ -13,6 +13,8 @@ namespace Oksijen
 {
 	void Run()
 	{
+		//Get monitor
+		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[1];
 
 		//Create window
 		WindowDesc windowDesc = {};
@@ -24,9 +26,6 @@ namespace Oksijen
 
 		PlatformWindow* pWindow = PlatformWindow::Create(windowDesc);
 		pWindow->Show();
-
-		//Get monitor
-		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[1];
 
 		//Set target monitor dettails
 		pWindow->SetMode(WindowMode::Borderless);
@@ -64,7 +63,6 @@ namespace Oksijen
 		dynamicRenderingFeatures.pNext = nullptr;
 		GraphicsDevice* pDevice = pDefaultAdapter->CreateDevice(deviceExtensions, deviceLayers, deviceQueueFamilyRequests, nullptr, &dynamicRenderingFeatures);
 
-
 		//Get default graphics queue
 		GraphicsQueue* pDefaultGraphicsQueue = pDevice->RentQueue(VK_QUEUE_GRAPHICS_BIT);
 
@@ -72,11 +70,11 @@ namespace Oksijen
 		Surface* pSurface = pInstance->CreateSurface(pWindow);
 
 		//Test surface
-		const unsigned int requestedSwapchainBufferCount = 2;
-		const VkFormat requestedSwapchainFormat = VK_FORMAT_R8G8B8A8_UNORM;
-		const VkImageUsageFlags requestedSwapchainImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-		const VkColorSpaceKHR requestedSwapchainFormatColorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-		const VkPresentModeKHR requestedSwapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+		constexpr unsigned int requestedSwapchainBufferCount = 2;
+		constexpr VkFormat requestedSwapchainFormat = VK_FORMAT_R8G8B8A8_UNORM;
+		constexpr VkImageUsageFlags requestedSwapchainImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+		constexpr VkColorSpaceKHR requestedSwapchainFormatColorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+		constexpr VkPresentModeKHR requestedSwapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 		const unsigned int requestedSwapchainWidth = pWindow->GetWidth();
 		const unsigned int requestedSwapchainHeight = pWindow->GetHeight();
 		{
@@ -119,7 +117,29 @@ namespace Oksijen
 		}
 
 		//Create swapchain
-		Swapchain* pSwapchain = pDevice->CreateSwapchain(pSurface, pDefaultGraphicsQueue, requestedSwapchainBufferCount, requestedSwapchainWidth, requestedSwapchainHeight, requestedSwapchainPresentMode, requestedSwapchainFormat, requestedSwapchainFormatColorspace, requestedSwapchainImageUsageFlags);
+		Swapchain* pSwapchain = pDevice->CreateSwapchain(
+			pSurface,
+			pDefaultGraphicsQueue,
+			requestedSwapchainBufferCount,
+			requestedSwapchainWidth, requestedSwapchainHeight,
+			1,
+			requestedSwapchainPresentMode,
+			requestedSwapchainFormat, requestedSwapchainFormatColorspace,
+			requestedSwapchainImageUsageFlags);
+
+		//Create swapchain texture views
+		TextureView* ppSwapchainTextureViews[requestedSwapchainBufferCount];
+		for (unsigned int i = 0; i < requestedSwapchainBufferCount; i++)
+		{
+			constexpr VkComponentMapping mapping =
+			{
+				VK_COMPONENT_SWIZZLE_IDENTITY,
+				VK_COMPONENT_SWIZZLE_IDENTITY,
+				VK_COMPONENT_SWIZZLE_IDENTITY,
+				VK_COMPONENT_SWIZZLE_IDENTITY 
+			};
+			ppSwapchainTextureViews[i] = pDevice->CreateTextureView(pSwapchain->GetTexture(i), 0, 0, VK_IMAGE_VIEW_TYPE_2D, requestedSwapchainFormat, mapping, VK_IMAGE_ASPECT_COLOR_BIT);
+		}
 
 		//Create fences
 		Fence* pPresentImageAcquireFence = pDevice->CreateFence(false);
@@ -141,7 +161,8 @@ namespace Oksijen
 				VK_QUEUE_GRAPHICS_BIT,VK_QUEUE_GRAPHICS_BIT,
 				VK_IMAGE_ASPECT_COLOR_BIT,0,0,
 				VK_ACCESS_NONE,VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VkDependencyFlags());
 		}
 		pCmdList->End();
 		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**) & pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
@@ -173,34 +194,38 @@ namespace Oksijen
 				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
 				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
 				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VkDependencyFlags());
 
-			//Start dynamic rendering
-			VkRenderingAttachmentInfo colorAttachmentInfo = {};
-			colorAttachmentInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-			colorAttachmentInfo.imageView = pSwapchain->GetImageView(swapchainImageIndex);
-			colorAttachmentInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			colorAttachmentInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-			colorAttachmentInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+			//Set dynamic rendering color attachment
+			VkClearValue colorAttachmentClearValue = {};
 			if (bRed)
 			{
-				colorAttachmentInfo.clearValue.color.float32[0] = 1.0f;
-				colorAttachmentInfo.clearValue.color.float32[1] = 0.0f;
-				colorAttachmentInfo.clearValue.color.float32[2] = 0.0f;
-				colorAttachmentInfo.clearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.color.float32[0] = 1.0f;
+				colorAttachmentClearValue.color.float32[1] = 0.0f;
+				colorAttachmentClearValue.color.float32[2] = 0.0f;
+				colorAttachmentClearValue.color.float32[3] = 1.0f;
 			}
 			else
 			{
-				colorAttachmentInfo.clearValue.color.float32[0] = 0.0f;
-				colorAttachmentInfo.clearValue.color.float32[1] = 0.0f;
-				colorAttachmentInfo.clearValue.color.float32[2] = 1.0f;
-				colorAttachmentInfo.clearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.color.float32[0] = 0.0f;
+				colorAttachmentClearValue.color.float32[1] = 0.0f;
+				colorAttachmentClearValue.color.float32[2] = 1.0f;
+				colorAttachmentClearValue.color.float32[3] = 1.0f;
 			}
-			colorAttachmentInfo.resolveImageView = VK_NULL_HANDLE;
-			colorAttachmentInfo.resolveMode = VK_RESOLVE_MODE_NONE;
-			colorAttachmentInfo.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			colorAttachmentInfo.pNext = nullptr;
-			pCmdList->BeginDynamicRendering(&colorAttachmentInfo,1,nullptr,nullptr,0,0,pWindow->GetWidth(),pWindow->GetHeight());
+
+			pCmdList->AddDynamicRenderingColorAttachment(
+				ppSwapchainTextureViews[swapchainImageIndex],
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				VkResolveModeFlags(),
+				nullptr,
+				VK_IMAGE_LAYOUT_UNDEFINED,
+				VK_ATTACHMENT_LOAD_OP_CLEAR,
+				VK_ATTACHMENT_STORE_OP_STORE,
+				colorAttachmentClearValue);
+
+			pCmdList->BeginDynamicRendering(0,1,0, 0, pWindow->GetWidth(), pWindow->GetHeight());
 
 			//End dynamic rendering
 			pCmdList->EndDynamicRendering();
@@ -212,7 +237,8 @@ namespace Oksijen
 				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
 				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
 				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VkDependencyFlags());
 
 			//End cmd
 			pCmdList->End();

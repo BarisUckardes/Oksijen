@@ -30,9 +30,9 @@ namespace Oksijen
 
 		return nullptr;
 	}
-	Swapchain* GraphicsDevice::CreateSwapchain(const Surface* pSurface, GraphicsQueue* pQueue, const unsigned int bufferCount, const unsigned int width, const unsigned int height, const VkPresentModeKHR presentMode, const VkFormat format, const VkColorSpaceKHR formatColorspace, const VkImageUsageFlags imageUsageFlags)
+	Swapchain* GraphicsDevice::CreateSwapchain(const Surface* pSurface, GraphicsQueue* pQueue, const unsigned int bufferCount, const unsigned int width, const unsigned int height,const unsigned int arrayLevels, const VkPresentModeKHR presentMode, const VkFormat format, const VkColorSpaceKHR formatColorspace, const VkImageUsageFlags imageUsageFlags)
 	{
-		return new Swapchain(pSurface,pQueue,this,bufferCount,width,height,presentMode,format,formatColorspace,imageUsageFlags);
+		return new Swapchain(pSurface,pQueue,this,bufferCount,width,height,arrayLevels,presentMode,format,formatColorspace,imageUsageFlags);
 	}
 	GraphicsMemory* GraphicsDevice::AllocateMemory(const VkMemoryPropertyFlagBits flags, const unsigned long long size)
 	{
@@ -41,6 +41,10 @@ namespace Oksijen
 	Texture* GraphicsDevice::CreateTexture(GraphicsMemory* pMemory, const VkImageType type, const VkFormat format, const unsigned int width, const unsigned int height,const unsigned int depth, const unsigned char mipLevels, const unsigned char arrayLevels, const VkSampleCountFlagBits samples, const VkImageTiling tiling, const VkImageUsageFlags usageFlags, const VkSharingMode sharingMode, const VkImageLayout imageLayout)
 	{
 		return new Texture(this,pMemory,type,format,width,height,depth,mipLevels,arrayLevels,samples,tiling,usageFlags,sharingMode,imageLayout);
+	}
+	TextureView* GraphicsDevice::CreateTextureView(const Texture* pTexture, const unsigned int mipIndex, const unsigned int arrayIndex, const VkImageViewType viewType, const VkFormat format, const VkComponentMapping mapping, const VkImageAspectFlags aspectMask)
+	{
+		return new TextureView(this,pTexture,mipIndex,arrayIndex,viewType,format,mapping,aspectMask);
 	}
 	Fence* GraphicsDevice::CreateFence(bool bSignalled)
 	{
@@ -57,6 +61,132 @@ namespace Oksijen
 	CommandList* GraphicsDevice::AllocateCommandList(const CommandPool* pPool)
 	{
 		return new CommandList(this,pPool);
+	}
+	Shader* GraphicsDevice::CreateShader(const std::string& entryPoint, const VkShaderStageFlags stage, const unsigned char* pBytes, const unsigned int byteCount)
+	{
+		return new Shader(this,entryPoint,stage,pBytes,byteCount);
+	}
+	GraphicsBuffer* GraphicsDevice::CreateBuffer(GraphicsMemory* pMemory, const VkBufferUsageFlags usages, const VkSharingMode sharingMode, const unsigned long long bufferSize)
+	{
+		return new GraphicsBuffer(this,pMemory,usages,sharingMode,bufferSize);
+	}
+	GraphicsPipeline* GraphicsDevice::CreateGraphicsPipeline(
+		const VkPipelineVertexInputStateCreateInfo& vertexInputState,
+		const VkPipelineInputAssemblyStateCreateInfo& inputAssemblyState,
+		const VkPipelineTessellationStateCreateInfo* pTesellationState,
+		const VkPipelineViewportStateCreateInfo* pViewportState,
+		const VkPipelineRasterizationStateCreateInfo& rasterizerState,
+		const VkPipelineMultisampleStateCreateInfo& multisampleState,
+		const VkPipelineDepthStencilStateCreateInfo& depthStencilState,
+		const VkPipelineColorBlendStateCreateInfo& blendingState,
+		const VkPipelineDynamicStateCreateInfo* pDynamicState,
+		const Shader** ppShaders, const unsigned int shaderCount,
+		const DescriptorSetLayout** ppDescriptorLayouts, const unsigned int descriptorLayoutCount,
+		const RenderPass* pRenderPass,
+		const Pipeline* pBasePipeline, const unsigned int basePipelineIndex,
+		const void* pNext)
+	{
+		return new GraphicsPipeline(
+			this,
+			vertexInputState,
+			inputAssemblyState,
+			pTesellationState,
+			pViewportState,
+			rasterizerState,
+			multisampleState,
+			depthStencilState,
+			blendingState,
+			pDynamicState,
+			ppShaders, shaderCount,
+			ppDescriptorLayouts, descriptorLayoutCount,
+			pRenderPass,
+			pBasePipeline, basePipelineIndex,
+			pNext);
+	}
+	Sampler* GraphicsDevice::CreateSampler(
+		const VkFilter magFilter, const VkFilter minFilter,
+		const VkSamplerMipmapMode mipmapMode, const VkSamplerAddressMode u, const VkSamplerAddressMode v, const VkSamplerAddressMode w,
+		const float mipLodBias,
+		const VkBool32 bAnisotropyEnabled, const float maxAnisotropy,
+		const VkBool32 bCompareEnabled, const VkCompareOp compareOp,
+		const float minLod, const float maxLod,
+		const VkBorderColor borderColor,
+		const VkBool32 unnormalizedCoordinates)
+	{
+		return new Sampler(this,magFilter,minFilter,mipmapMode,u,v,w,mipLodBias,bAnisotropyEnabled,maxAnisotropy,bCompareEnabled,compareOp,minLod,maxLod,borderColor,unnormalizedCoordinates);
+	}
+	DescriptorPool* GraphicsDevice::CreateDescriptorPool(
+		const VkDescriptorPoolCreateFlags flags,
+		const unsigned int maxSets,
+		const VkDescriptorType* pDescriptorTypes, const unsigned int* pDescriptorCounts,
+		const unsigned int descriptorTypeCount)
+	{
+		return new DescriptorPool(this,flags,maxSets,pDescriptorTypes,pDescriptorCounts,descriptorTypeCount);
+	}
+	DescriptorSetLayout* GraphicsDevice::CreateDescriptorSetLayout(
+		const unsigned int* pBindings,
+		const VkDescriptorType* pDescriptorTypes,
+		const unsigned int* pDescriptorCounts,
+		const VkShaderStageFlags* pStageFlags,
+		const unsigned char bindingCount)
+	{
+		return new DescriptorSetLayout(this,pBindings,pDescriptorTypes,pDescriptorCounts,pStageFlags,bindingCount);
+	}
+	DescriptorSet* GraphicsDevice::AllocateDescriptorSet(const DescriptorPool* pPool, const DescriptorSetLayout* pLayout)
+	{
+		return new DescriptorSet(this,pPool,pLayout);
+	}
+	void GraphicsDevice::UpdateHostBuffer(GraphicsBuffer* pBuffer, const unsigned char* pData, const unsigned long long dataSize, const unsigned long long dstBufferOffset)
+	{
+		void* pTargetHostData = nullptr;
+		DEV_ASSERT(vkMapMemory(mLogicalDevice, pBuffer->GetMemory()->GetMemory(), pBuffer->GetMemoryAlignedOffset() + dstBufferOffset, dataSize, VkMemoryMapFlags(), &pTargetHostData) == VK_SUCCESS, "GraphicsDevice", "Failed to map host buffer");
+		memcpy(pTargetHostData, pData, dataSize);
+		vkUnmapMemory(mLogicalDevice, pBuffer->GetMemory()->GetMemory());
+	}
+	void GraphicsDevice::UpdateDescriptorSetTextureSampler(
+		const DescriptorSet* pSet,
+		const unsigned int dstBinding,
+		const unsigned int dstArrayElement,
+		const VkDescriptorType type,
+		const TextureView* pTextureView,
+		const Sampler* pSampler,
+		const VkImageLayout textureLayout)
+	{
+		VkDescriptorImageInfo imageInfo = {};
+		imageInfo.imageLayout = textureLayout;
+		imageInfo.imageView = pTextureView != nullptr ? pTextureView->GetView() : VK_NULL_HANDLE;
+		imageInfo.sampler = pSampler != nullptr ? pSampler->GetSampler() : VK_NULL_HANDLE;
+
+		VkWriteDescriptorSet writeInfo = {};
+		writeInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writeInfo.dstSet = pSet->GetSet();
+		writeInfo.dstBinding = dstBinding;
+		writeInfo.dstArrayElement = dstArrayElement;
+		writeInfo.descriptorCount = 1;
+		writeInfo.descriptorType = type;
+		writeInfo.pImageInfo = &imageInfo;
+		writeInfo.pNext = nullptr;
+
+		vkUpdateDescriptorSets(mLogicalDevice, 1, &writeInfo, 0, nullptr);
+	}
+	void GraphicsDevice::UpdateDescriptorSetBuffer(const DescriptorSet* pSet, const unsigned int dstBinding, const unsigned int dstArrayElement, const VkDescriptorType type, const GraphicsBuffer* pBuffer, const unsigned long long offset, const unsigned long long range)
+	{
+		VkDescriptorBufferInfo bufferInfo = {};
+		bufferInfo.buffer = pBuffer->GetBuffer();
+		bufferInfo.offset = offset;
+		bufferInfo.range = range;
+
+		VkWriteDescriptorSet writeInfo = {};
+		writeInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writeInfo.dstSet = pSet->GetSet();
+		writeInfo.dstBinding = dstBinding;
+		writeInfo.dstArrayElement = dstArrayElement;
+		writeInfo.descriptorCount = 1;
+		writeInfo.descriptorType = type;
+		writeInfo.pBufferInfo = &bufferInfo;
+		writeInfo.pNext = nullptr;
+
+		vkUpdateDescriptorSets(mLogicalDevice, 1, &writeInfo, 0, nullptr);
 	}
 	void GraphicsDevice::SubmitCommandLists(const GraphicsQueue* pQueue, const CommandList** ppCmdLists, const unsigned int cmdListCount, const VkPipelineStageFlags* pWaitDstPipelineStageFlags, const Fence* pWaitFence, const Semaphore** ppWaitSemaphores, const unsigned int waitSemaphoreCount, const Semaphore** ppSignalSemaphores, const unsigned int signalSemaphoreCount)
 	{

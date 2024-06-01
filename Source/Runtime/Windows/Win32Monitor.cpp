@@ -1,4 +1,5 @@
 #include "Win32Monitor.h"
+#include <Runtime/Core/Core.h>
 
 namespace Oksijen
 {
