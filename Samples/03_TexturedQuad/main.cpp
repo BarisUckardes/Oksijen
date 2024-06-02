@@ -59,7 +59,7 @@ namespace Oksijen
 		windowDesc.Y = 0;
 		windowDesc.Width = 512;
 		windowDesc.Height = 512;
-		windowDesc.Title = "Oksijen_RedBlueAlternating";
+		windowDesc.Title = "03_TexturedQuad";
 
 		PlatformWindow* pWindow = PlatformWindow::Create(windowDesc);
 		pWindow->Show();
@@ -566,20 +566,20 @@ namespace Oksijen
 			pCmdList->SetDescriptorSets((const DescriptorSet**)&pDescriptorSet, 1, 0, nullptr, 0);
 
 			//Set dynamic rendering color attachment
-			VkClearValue colorAttachmentClearValue = {};
+			VkClearColorValue colorAttachmentClearValue = {};
 			if (bRed)
 			{
-				colorAttachmentClearValue.color.float32[0] = 1.0f;
-				colorAttachmentClearValue.color.float32[1] = 0.0f;
-				colorAttachmentClearValue.color.float32[2] = 0.0f;
-				colorAttachmentClearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.float32[0] = 1.0f;
+				colorAttachmentClearValue.float32[1] = 0.0f;
+				colorAttachmentClearValue.float32[2] = 0.0f;
+				colorAttachmentClearValue.float32[3] = 1.0f;
 			}
 			else
 			{
-				colorAttachmentClearValue.color.float32[0] = 0.0f;
-				colorAttachmentClearValue.color.float32[1] = 0.0f;
-				colorAttachmentClearValue.color.float32[2] = 1.0f;
-				colorAttachmentClearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.float32[0] = 0.0f;
+				colorAttachmentClearValue.float32[1] = 0.0f;
+				colorAttachmentClearValue.float32[2] = 1.0f;
+				colorAttachmentClearValue.float32[3] = 1.0f;
 			}
 
 			pCmdList->AddDynamicRenderingColorAttachment(
@@ -587,7 +587,7 @@ namespace Oksijen
 				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VkResolveModeFlags(),
 				nullptr,
-				VK_IMAGE_LAYOUT_UNDEFINED,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VK_ATTACHMENT_LOAD_OP_CLEAR,
 				VK_ATTACHMENT_STORE_OP_STORE,
 				colorAttachmentClearValue);

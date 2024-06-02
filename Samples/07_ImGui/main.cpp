@@ -8,6 +8,7 @@
 #include <vulkan/vulkan_win32.h>
 #endif
 #include <Runtime/Platform/PlatformMonitor.h>
+#include <Runtime/ImGui/ImGuiRenderer.h>
 
 namespace Oksijen
 {
@@ -169,66 +170,41 @@ namespace Oksijen
 		pCmdFence->Wait();
 		pCmdFence->Reset();
 
-		bool bRed = true;
+		//Initialize imgui renderer
+		ImGuiRenderer* pRenderer = new ImGuiRenderer(pDevice,pDefaultGraphicsQueue);
+
+		//Application loop
 		while (pWindow->IsActive())
 		{
-			// poll window events
+			//Poll window events
 			pWindow->PollEvents();
 			if (!pWindow->IsActive())
 			{
 				break;
 			}
 
+			//Update imgui events
+			pRenderer->UpdateEvents(pWindow->GetBufferedEvents());
+
 			//Acquire image index
 			const unsigned int swapchainImageIndex = pSwapchain->AcquireImageIndex(pPresentImageAcquireFence, nullptr);
 			pPresentImageAcquireFence->Wait();
 			pPresentImageAcquireFence->Reset();
 
-			//Begin cmd
-			pCmdList->Begin();
-
-			//Pre barrier
-			pCmdList->SetPipelineTextureBarrier(
-				pSwapchain->GetTexture(swapchainImageIndex),
-				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
-				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
-				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			//Render ImGui
+			pRenderer->StartRendering(1);
+			ImGui::ShowDemoWindow();
+			pRenderer->EndRendering(
+				ppSwapchainTextureViews[swapchainImageIndex],
+				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+				VK_QUEUE_GRAPHICS_BIT,
+				VK_IMAGE_ASPECT_COLOR_BIT,
+				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 				VkDependencyFlags());
 
-
-			//Set dynamic rendering color attachment
-			VkClearColorValue colorAttachmentClearValue = {};
-			if (bRed)
-			{
-				colorAttachmentClearValue.float32[0] = 1.0f;
-				colorAttachmentClearValue.float32[1] = 0.0f;
-				colorAttachmentClearValue.float32[2] = 0.0f;
-				colorAttachmentClearValue.float32[3] = 1.0f;
-			}
-			else
-			{
-				colorAttachmentClearValue.float32[0] = 0.0f;
-				colorAttachmentClearValue.float32[1] = 0.0f;
-				colorAttachmentClearValue.float32[2] = 1.0f;
-				colorAttachmentClearValue.float32[3] = 1.0f;
-			}
-
-			pCmdList->AddDynamicRenderingColorAttachment(
-				ppSwapchainTextureViews[swapchainImageIndex],
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VkResolveModeFlags(),
-				nullptr,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_ATTACHMENT_LOAD_OP_CLEAR,
-				VK_ATTACHMENT_STORE_OP_STORE,
-				colorAttachmentClearValue);
-
-			pCmdList->BeginDynamicRendering(0,1,0, 0, pWindow->GetWidth(), pWindow->GetHeight());
-
-			//End dynamic rendering
-			pCmdList->EndDynamicRendering();
+			//Begin cmd
+			pCmdList->Begin();
 
 			//Post barrier for presenting
 			pCmdList->SetPipelineTextureBarrier(
@@ -251,7 +227,6 @@ namespace Oksijen
 			//Present
 			pSwapchain->Present(swapchainImageIndex);
 
-			bRed = !bRed;
 		}
 	}
 }

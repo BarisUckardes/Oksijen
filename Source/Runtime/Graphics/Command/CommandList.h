@@ -96,7 +96,7 @@ namespace Oksijen
 			const VkImageLayout resolveAttachmentLayout,
 			const VkAttachmentLoadOp attachmentLoadOp,
 			const VkAttachmentStoreOp attachmentStoreOp,
-			const VkClearValue attachmentClearValue);
+			const VkClearColorValue attachmentClearValue);
 		void SetDynamicRenderingDepthAttachment(
 			const TextureView* pAttachmentView,
 			const VkImageLayout attachmentLayout,
@@ -125,6 +125,8 @@ namespace Oksijen
 		void SetPipeline(const Pipeline* pPipeline);
 
 
+		void DispatchCompute(const unsigned x, const unsigned y, const unsigned z);
+
 		void CopyBufferBuffer(
 			GraphicsBuffer* pSrcBuffer,GraphicsBuffer* pDstBuffer,
 			const unsigned long long srcOffset,const unsigned long long dstOffset,const unsigned long long size);
@@ -140,15 +142,15 @@ namespace Oksijen
 		void SetVertexBuffers(const GraphicsBuffer** ppBuffers, const unsigned char bufferCount, const unsigned char firstBinding, const unsigned long long* pOffsets);
 		void SetIndexBuffer(const GraphicsBuffer* pBuffer, const unsigned long long offset, const VkIndexType type);
 
-		void SetViewport(const VkViewport* pViewports, const unsigned int viewportCount,const unsigned int firstViewport);
-		void SetScissor(const VkRect2D* pRects,const unsigned int scissorCount,const unsigned int firstScissor);
+		void PlaceViewport(const VkViewport* pViewports, const unsigned int viewportCount,const unsigned int firstViewport);
+		void PlaceScissor(const VkRect2D* pRects,const unsigned int scissorCount,const unsigned int firstScissor);
 
 		void SetViewports(const VkViewport* pViewports, const unsigned int count);
 		void SetScissors(const VkRect2D* pRects, const unsigned int count);
 
 		void SetDescriptorSets(const DescriptorSet** ppSets, const unsigned int setCount,const unsigned int firstSetIndex,const unsigned int* pDynamicOffsets,const unsigned int dynamicOffsetCount);
 
-		void DrawIndexed(const unsigned int indexCount, const unsigned int instanceCount, const unsigned int firstIndex,const unsigned int vertexOffset, const unsigned int firstInstance);
+		void DrawIndexed(const unsigned int indexCount, const unsigned int instanceCount, const unsigned int firstIndex,const unsigned int firstVertex, const unsigned int firstInstance);
 
 	private:
 		const VkDevice mLogicalDevice;

@@ -10,6 +10,7 @@ namespace Oksijen
 	}
 	Pipeline::~Pipeline()
 	{
+		vkDestroyPipelineLayout(mLogicalDevice, mLayout, nullptr);
 		vkDestroyPipeline(mLogicalDevice, mPipeline, nullptr);
 	}
 }

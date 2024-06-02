@@ -38,7 +38,8 @@ namespace Oksijen
         pipelineLayoutInfo.pushConstantRangeCount = 0;
         pipelineLayoutInfo.pNext = nullptr;
 
-        DEV_ASSERT(vkCreatePipelineLayout(mLogicalDevice, &pipelineLayoutInfo, nullptr, &mLayout) == VK_SUCCESS, "GraphicsPipeline", "Failed to create pipeline layout");
+        VkPipelineLayout layout = VK_NULL_HANDLE;
+        DEV_ASSERT(vkCreatePipelineLayout(mLogicalDevice, &pipelineLayoutInfo, nullptr, &layout) == VK_SUCCESS, "GraphicsPipeline", "Failed to create pipeline layout");
 
         //Create shader stages
         VkPipelineShaderStageCreateInfo shaderStageInformations[16];
@@ -71,7 +72,7 @@ namespace Oksijen
         pipelineInfo.pDynamicState = pDynamicState;
         pipelineInfo.stageCount = shaderCount;
         pipelineInfo.pStages = shaderStageInformations;
-        pipelineInfo.layout = mLayout;
+        pipelineInfo.layout = layout;
         pipelineInfo.basePipelineHandle = pBasePipeline != nullptr ? pBasePipeline->GetPipeline() : nullptr;
         pipelineInfo.basePipelineIndex = basePipelineIndex;
         pipelineInfo.subpass = 0;
@@ -81,11 +82,11 @@ namespace Oksijen
         VkPipeline pipeline = VK_NULL_HANDLE;
         DEV_ASSERT(vkCreateGraphicsPipelines(mLogicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) == VK_SUCCESS, "GraphicsPipeline", "Failed to create pipeline");
 
-        SetPipelineProperties(pipeline,mLayout);
+        SetPipelineProperties(pipeline, layout);
 
     }
     GraphicsPipeline::~GraphicsPipeline()
     {
-        vkDestroyPipelineLayout(mLogicalDevice, mLayout, nullptr);
+        
     }
 }

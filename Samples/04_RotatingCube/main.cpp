@@ -19,47 +19,35 @@ namespace Oksijen
 {
 	static const char vertexShaderSource[] =
 		R"STR(
-            struct VertexBufferData
+			#version 430 core
+			layout(location = 0) in vec3 Pos;
+			layout(location = 1) in vec2 UvIn;
+			layout(location = 0) out vec2 UvOut;
+			layout(std140,binding = 0,set = 0) uniform VertexBufferData
 			{
-				float4x4 Mvp;
+				mat4 Mvp;
 			};
-			ConstantBuffer<VertexBufferData> vertexBuffer : register(b0, space0);
-			struct VS_INPUT
-            {
-              float3 pos : POSITION;
-              float2 uv  : TEXCOORD0;
-            };
-            
-            struct PS_INPUT
-            {
-              float4 pos : SV_POSITION;
-              float2 uv  : TEXCOORD0;
-            };
-            
-            PS_INPUT main(VS_INPUT input)
-            {
-              PS_INPUT output;
-              output.pos = mul(float4(input.pos.xyz, 1.f),vertexBuffer.Mvp);
-              output.uv  = input.uv;
-              return output;
-            }
+			
+			void main()
+			{
+				gl_Position = vec4(Pos,1.0f)*Mvp;
+				UvOut = UvIn;
+			}
 )STR";
 
 	static const char pixelShaderSource[] =
 		R"STR(
-            struct PS_INPUT
-            {
-				float4 pos : SV_POSITION;
-				float2 uv  : TEXCOORD0;
-            };
-            Texture2D texture0 : register(t1,space0);
-            sampler sampler0 : register(s2,space0);
-            
-            float4 main(PS_INPUT input) : SV_Target
-            {
-				float4 out_col = texture0.Sample(sampler0,input.uv) + float4(input.uv.x,input.uv.y,0,1.0f); 
-				return out_col; 
-            }
+			#version 430 core
+			layout(location = 0) in vec2 Uv;
+			layout(location = 0) out vec4 out_col;
+			
+			layout(binding = 1,set = 0) uniform texture2D texture0;
+			layout(binding = 2,set = 0) uniform sampler sampler0;
+			void main()
+			{
+				vec4 color = texture(sampler2D(texture0,sampler0),Uv) + vec4(Uv.x,Uv.y,0,1.0f);
+				out_col = color;
+			}
 )STR";
 
 	void Run()
@@ -73,7 +61,7 @@ namespace Oksijen
 		windowDesc.Y = 0;
 		windowDesc.Width = 512;
 		windowDesc.Height = 512;
-		windowDesc.Title = "Oksijen_RedBlueAlternating";
+		windowDesc.Title = "04_RotatingCube";
 
 		PlatformWindow* pWindow = PlatformWindow::Create(windowDesc);
 		pWindow->Show();
@@ -122,12 +110,12 @@ namespace Oksijen
 		unsigned char* pVertexShaderSPIRVBytes = nullptr;
 		unsigned int vertexShaderSPIRVByteCount = 0;
 		std::string vertexShaderCompilationErrors;
-		DEV_ASSERT(ShaderCompiler::TextToSPIRV(vertexShaderSource, "main", shaderc_vertex_shader, shaderc_source_language_hlsl, &pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount, vertexShaderCompilationErrors),"Main","Failed to compile vertex shader!");
+		DEV_ASSERT(ShaderCompiler::TextToSPIRV(vertexShaderSource, "main", shaderc_vertex_shader, shaderc_source_language_glsl, &pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount, vertexShaderCompilationErrors),"Main","Failed to compile vertex shader with logs: %s",vertexShaderCompilationErrors.c_str());
 
 		unsigned char* pFragmentShaderSPIRVBytes = nullptr;
 		unsigned int fragmentShaderSPIRVByteCount = 0;
 		std::string fragmentShaderCompilationErrors;
-		DEV_ASSERT(ShaderCompiler::TextToSPIRV(pixelShaderSource, "main", shaderc_fragment_shader, shaderc_source_language_hlsl, &pFragmentShaderSPIRVBytes, fragmentShaderSPIRVByteCount, fragmentShaderCompilationErrors), "Main", "Failed to compile the fragment shader");
+		DEV_ASSERT(ShaderCompiler::TextToSPIRV(pixelShaderSource, "main", shaderc_fragment_shader, shaderc_source_language_glsl, &pFragmentShaderSPIRVBytes, fragmentShaderSPIRVByteCount, fragmentShaderCompilationErrors), "Main", "Failed to compile the fragment shader with logs: %s",fragmentShaderCompilationErrors.c_str());
 
 		//Create shaders
 		Shader* pVertexShader = pDevice->CreateShader("main",VK_SHADER_STAGE_VERTEX_BIT,pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount);
@@ -358,8 +346,8 @@ namespace Oksijen
 		);
 
 		//Create descriptor pool
-		constexpr VkDescriptorType descriptorTypes[2] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLER};
-		constexpr unsigned int descriptorTypeCounts[2] = { 1,1 };
+		constexpr VkDescriptorType descriptorTypes[] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLER};
+		constexpr unsigned int descriptorTypeCounts[] = { 1,1,1 };
 		DescriptorPool* pDescriptorPool = pDevice->CreateDescriptorPool(
 			VkDescriptorPoolCreateFlags(),
 			1,
@@ -702,20 +690,20 @@ namespace Oksijen
 			pCmdList->SetDescriptorSets((const DescriptorSet**)&pDescriptorSet, 1, 0, nullptr, 0);
 
 			//Set dynamic rendering color attachment
-			VkClearValue colorAttachmentClearValue = {};
+			VkClearColorValue colorAttachmentClearValue = {};
 			if (bRed)
 			{
-				colorAttachmentClearValue.color.float32[0] = 1.0f;
-				colorAttachmentClearValue.color.float32[1] = 0.0f;
-				colorAttachmentClearValue.color.float32[2] = 0.0f;
-				colorAttachmentClearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.float32[0] = 1.0f;
+				colorAttachmentClearValue.float32[1] = 0.0f;
+				colorAttachmentClearValue.float32[2] = 0.0f;
+				colorAttachmentClearValue.float32[3] = 1.0f;
 			}
 			else
 			{
-				colorAttachmentClearValue.color.float32[0] = 0.0f;
-				colorAttachmentClearValue.color.float32[1] = 0.0f;
-				colorAttachmentClearValue.color.float32[2] = 1.0f;
-				colorAttachmentClearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.float32[0] = 0.0f;
+				colorAttachmentClearValue.float32[1] = 0.0f;
+				colorAttachmentClearValue.float32[2] = 1.0f;
+				colorAttachmentClearValue.float32[3] = 1.0f;
 			}
 
 			pCmdList->AddDynamicRenderingColorAttachment(
@@ -723,7 +711,7 @@ namespace Oksijen
 				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VkResolveModeFlags(),
 				nullptr,
-				VK_IMAGE_LAYOUT_UNDEFINED,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VK_ATTACHMENT_LOAD_OP_CLEAR,
 				VK_ATTACHMENT_STORE_OP_STORE,
 				colorAttachmentClearValue);

@@ -103,6 +103,14 @@ namespace Oksijen
 			pBasePipeline, basePipelineIndex,
 			pNext);
 	}
+	ComputePipeline* GraphicsDevice::CreateComputePipeline(
+		const VkPipelineCreateFlags flags,
+		const Shader* pShader,
+		const DescriptorSetLayout** ppSetLayouts, const unsigned int setLayoutCount,
+		const Pipeline* pBasePipeline, const unsigned int basePipelineIndex)
+	{
+		return new ComputePipeline(this,flags,pShader,ppSetLayouts,setLayoutCount,pBasePipeline,basePipelineIndex);
+	}
 	Sampler* GraphicsDevice::CreateSampler(
 		const VkFilter magFilter, const VkFilter minFilter,
 		const VkSamplerMipmapMode mipmapMode, const VkSamplerAddressMode u, const VkSamplerAddressMode v, const VkSamplerAddressMode w,

@@ -13,37 +13,32 @@
 namespace Oksijen
 {
 	static const char vertexShaderSource[] =
-		"struct VS_INPUT\
-            {\
-              float2 pos : POSITION;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            struct PS_INPUT\
-            {\
-              float4 pos : SV_POSITION;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            PS_INPUT main(VS_INPUT input)\
-            {\
-				PS_INPUT output;\
-				output.pos = float4(input.pos.xy, 0.f, 1.f);\
-				output.uv  = input.uv;\
-				return output;\
-            }";
+		R"STR(
+			#version 430 core
+			layout(location = 0) in vec3 Pos;
+			layout(location = 1) in vec2 UvIn;
+			layout(location = 0) out vec2 UvOut;
+
+			void main()
+			{
+				gl_Position = vec4(Pos,1.0f);
+				UvOut = UvIn;
+			}
+)STR";
 
 	static const char pixelShaderSource[] =
-		"	struct PS_INPUT\
-            {\
-				float4 pos : SV_POSITION;\
-				float2 uv  : TEXCOORD0;\
-            };\
-            float4 main(PS_INPUT input) : SV_Target\
-            {\
-				float4 out_col = float4(input.uv,0.0f,1.0f);\
-				return out_col; \
-            }";
+		R"STR(
+            #version 430 core
+			layout(location = 0) in vec2 Uv;
+			layout(location = 0) out vec4 out_col;
+			
+
+			void main()
+			{
+				vec4 color =vec4(Uv.x,Uv.y,0,1.0f);
+				out_col = color;
+			}
+)STR";
 
 	void Run()
 	{
@@ -56,7 +51,7 @@ namespace Oksijen
 		windowDesc.Y = 0;
 		windowDesc.Width = 512;
 		windowDesc.Height = 512;
-		windowDesc.Title = "Oksijen_RedBlueAlternating";
+		windowDesc.Title = "02_HelloTriangle";
 
 		PlatformWindow* pWindow = PlatformWindow::Create(windowDesc);
 		pWindow->Show();
@@ -104,12 +99,12 @@ namespace Oksijen
 		unsigned char* pVertexShaderSPIRVBytes = nullptr;
 		unsigned int vertexShaderSPIRVByteCount = 0;
 		std::string vertexShaderCompilationErrors;
-		DEV_ASSERT(ShaderCompiler::TextToSPIRV(vertexShaderSource, "main", shaderc_vertex_shader, shaderc_source_language_hlsl, &pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount, vertexShaderCompilationErrors),"Main","Failed to compile vertex shader!");
+		DEV_ASSERT(ShaderCompiler::TextToSPIRV(vertexShaderSource, "main", shaderc_vertex_shader, shaderc_source_language_glsl, &pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount, vertexShaderCompilationErrors),"Main","Failed to compile vertex shader!");
 
 		unsigned char* pFragmentShaderSPIRVBytes = nullptr;
 		unsigned int fragmentShaderSPIRVByteCount = 0;
 		std::string fragmentShaderCompilationErrors;
-		DEV_ASSERT(ShaderCompiler::TextToSPIRV(pixelShaderSource, "main", shaderc_fragment_shader, shaderc_source_language_hlsl, &pFragmentShaderSPIRVBytes, fragmentShaderSPIRVByteCount, fragmentShaderCompilationErrors), "Main", "Failed to compile the fragment shader");
+		DEV_ASSERT(ShaderCompiler::TextToSPIRV(pixelShaderSource, "main", shaderc_fragment_shader, shaderc_source_language_glsl, &pFragmentShaderSPIRVBytes, fragmentShaderSPIRVByteCount, fragmentShaderCompilationErrors), "Main", "Failed to compile the fragment shader");
 
 		//Create shaders
 		Shader* pVertexShader = pDevice->CreateShader("main",VK_SHADER_STAGE_VERTEX_BIT,pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount);
@@ -439,20 +434,20 @@ namespace Oksijen
 				VkDependencyFlags());
 
 			//Set dynamic rendering color attachment
-			VkClearValue colorAttachmentClearValue = {};
+			VkClearColorValue colorAttachmentClearValue = {};
 			if (bRed)
 			{
-				colorAttachmentClearValue.color.float32[0] = 1.0f;
-				colorAttachmentClearValue.color.float32[1] = 0.0f;
-				colorAttachmentClearValue.color.float32[2] = 0.0f;
-				colorAttachmentClearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.float32[0] = 1.0f;
+				colorAttachmentClearValue.float32[1] = 0.0f;
+				colorAttachmentClearValue.float32[2] = 0.0f;
+				colorAttachmentClearValue.float32[3] = 1.0f;
 			}
 			else
 			{
-				colorAttachmentClearValue.color.float32[0] = 0.0f;
-				colorAttachmentClearValue.color.float32[1] = 0.0f;
-				colorAttachmentClearValue.color.float32[2] = 1.0f;
-				colorAttachmentClearValue.color.float32[3] = 1.0f;
+				colorAttachmentClearValue.float32[0] = 0.0f;
+				colorAttachmentClearValue.float32[1] = 0.0f;
+				colorAttachmentClearValue.float32[2] = 1.0f;
+				colorAttachmentClearValue.float32[3] = 1.0f;
 			}
 
 			pCmdList->AddDynamicRenderingColorAttachment(
@@ -460,7 +455,7 @@ namespace Oksijen
 				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VkResolveModeFlags(),
 				nullptr,
-				VK_IMAGE_LAYOUT_UNDEFINED,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VK_ATTACHMENT_LOAD_OP_CLEAR,
 				VK_ATTACHMENT_STORE_OP_STORE,
 				colorAttachmentClearValue);

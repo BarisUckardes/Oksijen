@@ -30,6 +30,5 @@ namespace Oksijen
 
 	private:
 		const VkDevice mLogicalDevice;
-		VkPipelineLayout mLayout;
 	};
 }

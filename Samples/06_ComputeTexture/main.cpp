@@ -8,9 +8,23 @@
 #include <vulkan/vulkan_win32.h>
 #endif
 #include <Runtime/Platform/PlatformMonitor.h>
+#include <Runtime/Graphics/Shader/ShaderCompiler.h>
+#include <Runtime/Graphics/Texture/TextureLoader.h>
 
 namespace Oksijen
 {
+	static const char computeShaderSource[] =
+		R"STR(
+			#version 430 core
+			layout(local_size_x = 10,local_size_y = 10,local_size_z =1) in;
+			layout(rgba32f,binding = 0) uniform image2D imgOutput;
+			void main()
+			{
+				imageStore(imgOutput,ivec2(gl_GlobalInvocationID.xy),vec4(0,1.0f,0,1.0f));
+			}	  
+)STR";
+	
+
 	void Run()
 	{
 		//Get monitor
@@ -22,7 +36,7 @@ namespace Oksijen
 		windowDesc.Y = 0;
 		windowDesc.Width = 512;
 		windowDesc.Height = 512;
-		windowDesc.Title = "01_RedBlueAlternating";
+		windowDesc.Title = "06_ComputeTexture";
 
 		PlatformWindow* pWindow = PlatformWindow::Create(windowDesc);
 		pWindow->Show();
@@ -51,6 +65,7 @@ namespace Oksijen
 		//Create device
 		std::vector<std::string> deviceExtensions;
 		deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+		deviceExtensions.push_back(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
 
 		std::vector<std::string> deviceLayers;
 		std::vector<QueueFamilyRequestInfo> deviceQueueFamilyRequests;
@@ -64,21 +79,30 @@ namespace Oksijen
 		GraphicsDevice* pDevice = pDefaultAdapter->CreateDevice(deviceExtensions, deviceLayers, deviceQueueFamilyRequests, nullptr, &dynamicRenderingFeatures);
 
 		//Get default graphics queue
-		GraphicsQueue* pDefaultGraphicsQueue = pDevice->RentQueue(VK_QUEUE_GRAPHICS_BIT);
+		GraphicsQueue* pDefaultQueue = pDevice->RentQueue(VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT);
+
+		//Create command pool
+		CommandPool* pCmdPool = pDevice->CreateCommandPool(VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT);
+
+		//Create command list
+		CommandList* pCmdList = pDevice->AllocateCommandList(pCmdPool);
+
+		//Create general use-case fence
+		Fence* pCmdFence = pDevice->CreateFence(false);
 
 		//Create surface
 		Surface* pSurface = pInstance->CreateSurface(pWindow);
 
 		//Test surface
-		constexpr unsigned int requestedSwapchainBufferCount = 2;
-		constexpr VkFormat requestedSwapchainFormat = VK_FORMAT_R8G8B8A8_UNORM;
-		constexpr VkImageUsageFlags requestedSwapchainImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-		constexpr VkColorSpaceKHR requestedSwapchainFormatColorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-		constexpr VkPresentModeKHR requestedSwapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+		const unsigned int requestedSwapchainBufferCount = 2;
+		const VkFormat requestedSwapchainFormat = VK_FORMAT_R8G8B8A8_UNORM;
+		const VkImageUsageFlags requestedSwapchainImageUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+		const VkColorSpaceKHR requestedSwapchainFormatColorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+		const VkPresentModeKHR requestedSwapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 		const unsigned int requestedSwapchainWidth = pWindow->GetWidth();
 		const unsigned int requestedSwapchainHeight = pWindow->GetHeight();
 		{
-			DEV_ASSERT(pDefaultAdapter->IsQueueSupportsSurface(pDefaultGraphicsQueue, pSurface), "Main", "Queue does not supported this surface");
+			DEV_ASSERT(pDefaultAdapter->IsQueueSupportsSurface(pDefaultQueue, pSurface), "Main", "Queue does not supported this surface");
 
 
 			const VkSurfaceCapabilitiesKHR capabilities = pDefaultAdapter->GetSurfaceCapabilities(pSurface);
@@ -119,7 +143,7 @@ namespace Oksijen
 		//Create swapchain
 		Swapchain* pSwapchain = pDevice->CreateSwapchain(
 			pSurface,
-			pDefaultGraphicsQueue,
+			pDefaultQueue,
 			requestedSwapchainBufferCount,
 			requestedSwapchainWidth, requestedSwapchainHeight,
 			1,
@@ -136,20 +160,61 @@ namespace Oksijen
 				VK_COMPONENT_SWIZZLE_IDENTITY,
 				VK_COMPONENT_SWIZZLE_IDENTITY,
 				VK_COMPONENT_SWIZZLE_IDENTITY,
-				VK_COMPONENT_SWIZZLE_IDENTITY 
+				VK_COMPONENT_SWIZZLE_IDENTITY
 			};
 			ppSwapchainTextureViews[i] = pDevice->CreateTextureView(pSwapchain->GetTexture(i), 0, 0, VK_IMAGE_VIEW_TYPE_2D, requestedSwapchainFormat, mapping, VK_IMAGE_ASPECT_COLOR_BIT);
 		}
 
-		//Create fences
+		//Create present image fence
 		Fence* pPresentImageAcquireFence = pDevice->CreateFence(false);
-		Fence* pCmdFence = pDevice->CreateFence(false);
 
-		//Create command pool
-		CommandPool* pCmdPool = pDevice->CreateCommandPool(VK_QUEUE_GRAPHICS_BIT);
 
-		//Create command list
-		CommandList* pCmdList = pDevice->AllocateCommandList(pCmdPool);
+		//Compile shaders
+		unsigned char* pComputeShaderSPIRVBytes = nullptr;
+		unsigned int computeShaderSPIRVByteCount = 0;
+		std::string computeShaderCompilationErrors;
+		DEV_ASSERT(ShaderCompiler::TextToSPIRV(computeShaderSource, "main", shaderc_compute_shader, shaderc_source_language_glsl, &pComputeShaderSPIRVBytes, computeShaderSPIRVByteCount, computeShaderCompilationErrors), "Main", "Failed to compile compute shader! with logs: %s", computeShaderCompilationErrors.c_str());
+
+		//Create shaders
+		Shader* pComputeShader = pDevice->CreateShader("main", VK_SHADER_STAGE_COMPUTE_BIT, pComputeShaderSPIRVBytes, computeShaderSPIRVByteCount);
+
+		//Create descriptor pool
+		constexpr VkDescriptorType poolDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE };
+		constexpr unsigned int poolDescriptorTypeCounts[] = { 3 };
+		DescriptorPool* pDescriptorPool = pDevice->CreateDescriptorPool(
+			VkDescriptorPoolCreateFlags(),
+			3,
+			poolDescriptorTypes, poolDescriptorTypeCounts,
+			1
+		);
+
+		//Create descriptor set layout
+		constexpr unsigned int descriptorSetLayoutBindingCounts[] = {0};
+		constexpr VkDescriptorType descriptorSetLayoutDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE };
+		constexpr VkShaderStageFlags descriptorLayoutStages[] = { VK_SHADER_STAGE_COMPUTE_BIT };
+		constexpr unsigned int descriptorSetlayoutDescriptorCounts[] = { 1 };
+		DescriptorSetLayout* pDescriptorSetLayout = pDevice->CreateDescriptorSetLayout(
+			descriptorSetLayoutBindingCounts,
+			descriptorSetLayoutDescriptorTypes,
+			descriptorSetlayoutDescriptorCounts,
+			descriptorLayoutStages,
+			1
+		);
+
+		//Create descriptor set
+		DescriptorSet* ppDescriptorSets[requestedSwapchainBufferCount];
+		for (unsigned char i = 0; i < requestedSwapchainBufferCount; i++)
+		{
+			ppDescriptorSets[i] = pDevice->AllocateDescriptorSet(pDescriptorPool,pDescriptorSetLayout);
+			pDevice->UpdateDescriptorSetTextureSampler(ppDescriptorSets[i], 0, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, ppSwapchainTextureViews[i], nullptr, VK_IMAGE_LAYOUT_GENERAL);
+		}
+
+		//Create compute pipeline
+		ComputePipeline* pComputePipeline = pDevice->CreateComputePipeline(
+			VkPipelineCreateFlags(),
+			pComputeShader,
+			(const DescriptorSetLayout**)&pDescriptorSetLayout, 1,
+			nullptr, 0);
 
 		//Set pipeline barriers for the images
 		pCmdList->Begin();
@@ -165,7 +230,7 @@ namespace Oksijen
 				VkDependencyFlags());
 		}
 		pCmdList->End();
-		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**) & pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+		pDevice->SubmitCommandLists(pDefaultQueue, (const CommandList**) & pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
 		pCmdFence->Wait();
 		pCmdFence->Reset();
 
@@ -187,45 +252,52 @@ namespace Oksijen
 			//Begin cmd
 			pCmdList->Begin();
 
-			//Pre barrier
+			//Compute barrier
 			pCmdList->SetPipelineTextureBarrier(
 				pSwapchain->GetTexture(swapchainImageIndex),
-				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
 				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
 				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
-				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VkDependencyFlags());
+				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VkDependencyFlags()
+			);
 
+			//Set compute pipeline
+			pCmdList->SetPipeline(pComputePipeline);
+
+			//Set descriptor heaps
+			pCmdList->SetDescriptorSets((const DescriptorSet**)&ppDescriptorSets[swapchainImageIndex], 1, 0, nullptr, 0);
+
+			//Dispatch compute
+			pCmdList->DispatchCompute(pWindow->GetWidth()/10, pWindow->GetHeight() / 10, 1);
+
+			//Attachment read barrier
+			pCmdList->SetPipelineTextureBarrier(
+				pSwapchain->GetTexture(swapchainImageIndex),
+				VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+				VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VkDependencyFlags());
 
 			//Set dynamic rendering color attachment
 			VkClearColorValue colorAttachmentClearValue = {};
-			if (bRed)
-			{
-				colorAttachmentClearValue.float32[0] = 1.0f;
-				colorAttachmentClearValue.float32[1] = 0.0f;
-				colorAttachmentClearValue.float32[2] = 0.0f;
-				colorAttachmentClearValue.float32[3] = 1.0f;
-			}
-			else
-			{
-				colorAttachmentClearValue.float32[0] = 0.0f;
-				colorAttachmentClearValue.float32[1] = 0.0f;
-				colorAttachmentClearValue.float32[2] = 1.0f;
-				colorAttachmentClearValue.float32[3] = 1.0f;
-			}
-
+			
+			//Add dynamic rendering color attachment
 			pCmdList->AddDynamicRenderingColorAttachment(
 				ppSwapchainTextureViews[swapchainImageIndex],
 				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VkResolveModeFlags(),
 				nullptr,
 				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_ATTACHMENT_LOAD_OP_CLEAR,
+				VK_ATTACHMENT_LOAD_OP_LOAD,
 				VK_ATTACHMENT_STORE_OP_STORE,
 				colorAttachmentClearValue);
 
-			pCmdList->BeginDynamicRendering(0,1,0, 0, pWindow->GetWidth(), pWindow->GetHeight());
+			//Start dynamic rendering
+			pCmdList->BeginDynamicRendering(0, 1, 0, 0, pWindow->GetWidth(), pWindow->GetHeight());
 
 			//End dynamic rendering
 			pCmdList->EndDynamicRendering();
@@ -244,7 +316,7 @@ namespace Oksijen
 			pCmdList->End();
 
 			//Submit cmd list
-			pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+			pDevice->SubmitCommandLists(pDefaultQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
 			pCmdFence->Wait();
 			pCmdFence->Reset();
 

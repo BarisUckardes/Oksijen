@@ -18,6 +18,7 @@ FetchContent_MakeAvailable(stbi)
 FetchContent_MakeAvailable(yaml-cpp)
 #FetchContent_MakeAvailable(assimp)
 FetchContent_MakeAvailable(spirv-reflect)
+FetchContent_MakeAvailable(imgui)
 # ------------------------------------------------------------
 
 # ---------------------- FILE ADDITION -----------------------
@@ -26,14 +27,22 @@ source_group(TREE "${CMAKE_SOURCE_DIR}/Source/Runtime" FILES ${SUBDIRECTORIES})
 add_library(Runtime main.cpp ${SUBDIRECTORIES})
 # ------------------------------------------------------------
 
+# ---------------------- IMGUI FILES -------------------------
+file(GLOB IMGUI_FILES "${imgui_SOURCE_DIR}/*.cpp" "${imgui_SOURCE_DIR}/*.h")
+source_group(TREE "${imgui_SOURCE_DIR}" FILES ${IMGUI_FILES})
+add_library(imgui STATIC ${IMGUI_FILES})
+# ------------------------------------------------------------
+
 # ------------------- INCLUDE DIRECTORIES --------------------
 target_include_directories(Runtime PRIVATE "${CMAKE_SOURCE_DIR}/Source")
 target_include_directories(Runtime PUBLIC "${yaml-cpp_SOURCE_DIR}/include")
 target_include_directories(Runtime PUBLIC "${spirv-reflect_SOURCE_DIR}")
+target_include_directories(Runtime PUBLIC "${imgui_SOURCE_DIR}")
 # ------------------------------------------------------------
 
 # ------------------- LINK -----------------------------------
 target_link_libraries(Runtime PUBLIC yaml-cpp)
+target_link_libraries(Runtime PUBLIC imgui)
 #target_link_libraries(Runtime PUBLIC assimp)
 target_link_libraries(Runtime PUBLIC spirv-reflect-static)
 

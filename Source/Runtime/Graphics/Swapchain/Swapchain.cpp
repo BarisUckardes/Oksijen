@@ -85,7 +85,7 @@ namespace Oksijen
 		DEV_ASSERT(vkGetSwapchainImagesKHR(mLogicalDevice, mSwapchain, &swapchainImageCount, images.data()) == VK_SUCCESS, "Swapchain", "Failed to get swapchain images");
 		for (const VkImage image : images)
 		{
-			mTextures.push_back(new Texture(image));
+			mTextures.push_back(new Texture(image,mWidth,mHeight,mArrayLevels));
 		}
 	}
 }

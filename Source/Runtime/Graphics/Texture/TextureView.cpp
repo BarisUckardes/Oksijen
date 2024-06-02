@@ -4,8 +4,8 @@
 
 namespace Oksijen
 {
-	TextureView::TextureView(const GraphicsDevice* pDevice, const Texture* pTexture, const unsigned int mipIndex, const unsigned int arrayIndex, const VkImageViewType viewType, const VkFormat format, const VkComponentMapping mapping, const VkImageAspectFlags aspectMask) :
-		mLogicalDevice(pDevice->GetLogicalDevice())
+	TextureView::TextureView(const GraphicsDevice* pDevice, const Texture* pTexture, const unsigned char mipIndex, const unsigned char arrayIndex, const VkImageViewType viewType, const VkFormat format, const VkComponentMapping mapping, const VkImageAspectFlags aspectMask) :
+		mLogicalDevice(pDevice->GetLogicalDevice()),mTexture(pTexture),mMipIndex(mipIndex),mArrayIndex(arrayIndex)
 	{
 		VkImageViewCreateInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;

@@ -11,6 +11,7 @@
 #include <Runtime/Graphics/Buffer/GraphicsBuffer.h>
 #include <Runtime/Graphics/Shader/Shader.h>
 #include <Runtime/Graphics/Pipeline/GraphicsPipeline.h>
+#include <Runtime/Graphics/Pipeline/ComputePipeline.h>
 #include <Runtime/Graphics/RenderPass/RenderPass.h>
 #include <Runtime/Graphics/Texture/TextureView.h>
 #include <Runtime/Graphics/Sampler/Sampler.h>
@@ -104,6 +105,11 @@ namespace Oksijen
 			const RenderPass* pRenderPass,
 			const Pipeline* pBasePipeline, const unsigned int basePipelineIndex,
 			const void* pNext);
+		ComputePipeline* CreateComputePipeline(
+			const VkPipelineCreateFlags flags,
+			const Shader* pShader,
+			const DescriptorSetLayout** ppSetLayouts, const unsigned int setLayoutCount,
+			const Pipeline* pBasePipeline, const unsigned int basePipelineIndex);
 		Sampler* CreateSampler(
 			const VkFilter magFilter, const VkFilter minFilter,
 			const VkSamplerMipmapMode mipmapMode, const VkSamplerAddressMode u, const VkSamplerAddressMode v, const VkSamplerAddressMode w,

@@ -268,8 +268,12 @@ namespace Oksijen
 		const VkImageLayout resolveAttachmentLayout,
 		const VkAttachmentLoadOp attachmentLoadOp,
 		const VkAttachmentStoreOp attachmentStoreOp,
-		const VkClearValue attachmentClearValue)
+		const VkClearColorValue attachmentClearValue)
 	{
+
+		VkClearValue clearValue = {};
+		clearValue.color = attachmentClearValue;
+
 		VkRenderingAttachmentInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		info.imageView = pAttachmentView->GetView();
@@ -279,7 +283,7 @@ namespace Oksijen
 		info.resolveImageLayout = resolveAttachmentLayout;
 		info.storeOp = attachmentStoreOp;
 		info.loadOp = attachmentLoadOp;
-		info.clearValue = attachmentClearValue;
+		info.clearValue = clearValue;
 		info.pNext = nullptr;
 
 		mDynamicRenderingColorAttachments.push_back(info);
@@ -379,6 +383,10 @@ namespace Oksijen
 		vkCmdBindPipeline(mCmdBuffer, pPipeline->GetBindPoint(), pPipeline->GetPipeline());
 		mBoundPipeline = pPipeline;
 	}
+	void CommandList::DispatchCompute(const unsigned x, const unsigned y, const unsigned z)
+	{
+		vkCmdDispatch(mCmdBuffer, x, y, z);
+	}
 	void CommandList::CopyBufferBuffer(
 		GraphicsBuffer* pSrcBuffer, GraphicsBuffer* pDstBuffer,
 		const unsigned long long srcOffset, const unsigned long long dstOffset,const unsigned long long size)
@@ -424,11 +432,11 @@ namespace Oksijen
 	{
 		vkCmdBindIndexBuffer(mCmdBuffer, pBuffer->GetBuffer(), offset, type);
 	}
-	void CommandList::SetViewport(const VkViewport* pViewports, const unsigned int viewportCount, const unsigned int firstViewport)
+	void CommandList::PlaceViewport(const VkViewport* pViewports, const unsigned int viewportCount, const unsigned int firstViewport)
 	{
 		vkCmdSetViewport(mCmdBuffer, firstViewport, viewportCount, pViewports);
 	}
-	void CommandList::SetScissor(const VkRect2D* pRects, const unsigned int scissorCount, const unsigned int firstScissor)
+	void CommandList::PlaceScissor(const VkRect2D* pRects, const unsigned int scissorCount, const unsigned int firstScissor)
 	{
 		vkCmdSetScissor(mCmdBuffer, firstScissor, scissorCount, pRects);
 	}
@@ -451,8 +459,8 @@ namespace Oksijen
 
 		vkCmdBindDescriptorSets(mCmdBuffer,mBoundPipeline->GetBindPoint(),mBoundPipeline->GetLayout(),firstSetIndex,setCount,sets,dynamicOffsetCount,pDynamicOffsets);
 	}
-	void CommandList::DrawIndexed(const unsigned int indexCount, const unsigned int instanceCount, const unsigned int firstIndex, const unsigned int vertexOffset, const unsigned int firstInstance)
+	void CommandList::DrawIndexed(const unsigned int indexCount, const unsigned int instanceCount, const unsigned int firstIndex, const unsigned int firstVertex, const unsigned int firstInstance)
 	{
-		vkCmdDrawIndexed(mCmdBuffer,indexCount,instanceCount,firstIndex,vertexOffset,firstInstance);
+		vkCmdDrawIndexed(mCmdBuffer,indexCount,instanceCount,firstIndex, firstVertex,firstInstance);
 	}
 }

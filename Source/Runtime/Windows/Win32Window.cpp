@@ -1,5 +1,5 @@
 #include "Win32Window.h"
-#include <Runtime/Core/Core.h>
+#include <Runtime/Windows/Win32Keys.h>
 
 namespace Oksijen
 {
@@ -57,6 +57,131 @@ namespace Oksijen
 			event.WindowWidth = LOWORD(lParam);
 			event.WindowHeight = HIWORD(lParam);
 
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_MOUSEMOVE:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::MouseMoved;
+			event.MousePosX = LOWORD(lParam);
+			event.MousePosY = HIWORD(lParam);
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_MOUSEWHEEL:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::MouseScrolled;
+			event.MouseWheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_LBUTTONDOWN:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::MouseButtonDown;
+			event.MouseButton = MouseButtons::Left;
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_LBUTTONUP:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::MouseButtonUp;
+			event.MouseButton = MouseButtons::Left;
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_RBUTTONDOWN:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::MouseButtonDown;
+			event.MouseButton = MouseButtons::Right;
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_RBUTTONUP:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::MouseButtonUp;
+			event.MouseButton = MouseButtons::Right;
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_KEYDOWN:
+		case WM_SYSKEYDOWN:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+			WindowEventData event = {};
+			event.Type = WindowEventType::KeyboardDown;
+			event.KeyboardKey = Win32Keys::GetKey(wParam);
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_KEYUP:
+		case WM_SYSKEYUP:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::KeyboardUp;
+			event.KeyboardKey = Win32Keys::GetKey(wParam);
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_CHAR:
+		{
+			Win32Window* pWindow = GetUserWindowData(hwnd);
+
+			WindowEventData event = {};
+			event.Type = WindowEventType::Char;
+			event.KeyboardChar = wParam;
+
+			pWindow->DispatchWindowEvent(event);
+			break;
+		}
+		case WM_DROPFILES:
+		{
+			//Get drop handle
+			HDROP dropHandle = (HDROP)wParam;
+
+			//Get item count
+			const unsigned int itemCount = DragQueryFile(dropHandle, 0xFFFFFFFF, NULL, 0);
+
+			//Create window event header
+			WindowEventData event = {};
+			event.Type = WindowEventType::DragDrop;
+
+			//Collect items
+			for (unsigned int i = 0; i < itemCount; i++)
+			{
+				char buffer[MAX_PATH];
+				DragQueryFile(dropHandle, i, buffer, MAX_PATH);
+				event.DropItems.push_back(buffer);
+			}
+
+			Win32Window* pWindow = GetUserWindowData(hwnd);
 			pWindow->DispatchWindowEvent(event);
 			break;
 		}

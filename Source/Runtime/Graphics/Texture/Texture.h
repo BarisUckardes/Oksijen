@@ -21,16 +21,22 @@ namespace Oksijen
 			const VkImageUsageFlags usageFlags,
 			const VkSharingMode sharingMode,
 			const VkImageLayout imageLayout);
-		Texture(const VkImage swapchainImage);
+		Texture(const VkImage swapchainImage,const unsigned int width,const unsigned int height,const unsigned int arrayLevels);
 		~Texture();
 
-		FORCEINLINE VkImage GetImage() const noexcept { return mImage; }
-		FORCEINLINE unsigned long long GetMemoryOffset() const noexcept { return mMemoryOffset; }
-		FORCEINLINE unsigned int long long GetAlignedMemoryOffset() const noexcept { return mAlignedMemoryOffset; }
+		FORCEINLINE unsigned int GetWidth() const noexcept { return mWidth; }
+		FORCEINLINE unsigned int GetHeight() const noexcept { return mHeight; }
+		FORCEINLINE unsigned int GetDepth() const noexcept { return mDepth; }
 		FORCEINLINE unsigned char GetMipLevels() const noexcept { return mMipLevels; }
 		FORCEINLINE unsigned char GetArrayLevels() const noexcept { return mArrayLevels; }
+		FORCEINLINE unsigned long long GetMemoryOffset() const noexcept { return mMemoryOffset; }
+		FORCEINLINE unsigned int long long GetAlignedMemoryOffset() const noexcept { return mAlignedMemoryOffset; }
+		FORCEINLINE VkImage GetImage() const noexcept { return mImage; }
 	private:
 		const VkDevice mLogicalDevice;
+		const unsigned int mWidth;
+		const unsigned int mHeight;
+		const unsigned int mDepth;
 		const unsigned char mMipLevels;
 		const unsigned char mArrayLevels;
 		const bool mSwapchainImage;

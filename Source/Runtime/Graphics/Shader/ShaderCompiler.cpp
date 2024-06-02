@@ -22,7 +22,7 @@ namespace Oksijen
 		}
 
 		//Compile
-		const shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(source.c_str(),source.size(), kind,"", entryMethod.c_str(),options);
+		const shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(source.c_str(),source.size(), kind,entryMethod.c_str(), entryMethod.c_str(), options);
 		if (result.GetCompilationStatus() != shaderc_compilation_status_success)
 		{
 			errorMessageOut = result.GetErrorMessage();
