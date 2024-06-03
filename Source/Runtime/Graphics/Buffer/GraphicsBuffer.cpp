@@ -30,6 +30,8 @@ namespace Oksijen
 
 		mMemoryOffset = memoryOffset;
 		mMemoryAlignedOffset = alignedMemoryOffset;
+
+		DEV_LOG("GraphicsBuffer", "Allocated %.2fMB", (requirements.size + requirements.alignment) / 1000000.0f);
 	}
 	GraphicsBuffer::~GraphicsBuffer()
 	{

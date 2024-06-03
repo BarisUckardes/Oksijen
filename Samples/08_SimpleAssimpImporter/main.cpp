@@ -11,42 +11,45 @@
 #include <Runtime/Graphics/Shader/ShaderCompiler.h>
 #include <Runtime/Graphics/Texture/TextureLoader.h>
 
+#include <glm/vec3.hpp>
+#include <glm/matrix.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <Runtime/Mesh/MeshLoader.h>
+
 namespace Oksijen
 {
 	static const char vertexShaderSource[] =
-		"struct VS_INPUT\
-            {\
-              float2 pos : POSITION;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            struct PS_INPUT\
-            {\
-              float4 pos : SV_POSITION;\
-              float2 uv  : TEXCOORD0;\
-            };\
-            \
-            PS_INPUT main(VS_INPUT input)\
-            {\
-				PS_INPUT output;\
-				output.pos = float4(input.pos.xy, 0.f, 1.f);\
-				output.uv  = input.uv;\
-				return output;\
-            }";
+		R"STR(
+			#version 430 core
+			layout(location = 0) in vec3 Pos;
+			layout(location = 1) in vec2 UvIn;
+			layout(location = 0) out vec2 UvOut;
+			layout(std140,binding = 0,set = 0) uniform VertexBufferData
+			{
+				mat4 Mvp;
+			};
+			
+			void main()
+			{
+				gl_Position = vec4(Pos,1.0f)*Mvp;
+				UvOut = UvIn;
+			}
+)STR";
 
 	static const char pixelShaderSource[] =
-		"	struct PS_INPUT\
-            {\
-				float4 pos : SV_POSITION;\
-				float2 uv  : TEXCOORD0;\
-            };\
-            Texture2D texture0 : register(t0,space0);\
-			sampler sampler0 : register(s1,space0);\
-            float4 main(PS_INPUT input) : SV_Target\
-            {\
-				 float4 out_col = texture0.Sample(sampler0,input.uv) + float4(input.uv.x,input.uv.y,0,1.0f); \
-				 return out_col; \
-            }";
+		R"STR(
+			#version 430 core
+			layout(location = 0) in vec2 Uv;
+			layout(location = 0) out vec4 out_col;
+			
+			layout(binding = 1,set = 0) uniform texture2D texture0;
+			layout(binding = 2,set = 0) uniform sampler sampler0;
+			void main()
+			{
+				vec4 color = texture(sampler2D(texture0,sampler0),Uv);
+				out_col = color;
+			}
+)STR";
 
 	void Run()
 	{
@@ -59,7 +62,7 @@ namespace Oksijen
 		windowDesc.Y = 0;
 		windowDesc.Width = 512;
 		windowDesc.Height = 512;
-		windowDesc.Title = "03_TexturedQuad";
+		windowDesc.Title = "08_SimpleAssimpImporter";
 
 		PlatformWindow* pWindow = PlatformWindow::Create(windowDesc);
 		pWindow->Show();
@@ -108,12 +111,12 @@ namespace Oksijen
 		unsigned char* pVertexShaderSPIRVBytes = nullptr;
 		unsigned int vertexShaderSPIRVByteCount = 0;
 		std::string vertexShaderCompilationErrors;
-		DEV_ASSERT(ShaderCompiler::TextToSPIRV(vertexShaderSource, "main", shaderc_vertex_shader, shaderc_source_language_hlsl, &pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount, vertexShaderCompilationErrors),"Main","Failed to compile vertex shader!");
+		DEV_ASSERT(ShaderCompiler::TextToSPIRV(vertexShaderSource, "main", shaderc_vertex_shader, shaderc_source_language_glsl, &pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount, vertexShaderCompilationErrors),"Main","Failed to compile vertex shader with logs: %s",vertexShaderCompilationErrors.c_str());
 
 		unsigned char* pFragmentShaderSPIRVBytes = nullptr;
 		unsigned int fragmentShaderSPIRVByteCount = 0;
 		std::string fragmentShaderCompilationErrors;
-		DEV_ASSERT(ShaderCompiler::TextToSPIRV(pixelShaderSource, "main", shaderc_fragment_shader, shaderc_source_language_hlsl, &pFragmentShaderSPIRVBytes, fragmentShaderSPIRVByteCount, fragmentShaderCompilationErrors), "Main", "Failed to compile the fragment shader");
+		DEV_ASSERT(ShaderCompiler::TextToSPIRV(pixelShaderSource, "main", shaderc_fragment_shader, shaderc_source_language_glsl, &pFragmentShaderSPIRVBytes, fragmentShaderSPIRVByteCount, fragmentShaderCompilationErrors), "Main", "Failed to compile the fragment shader with logs: %s",fragmentShaderCompilationErrors.c_str());
 
 		//Create shaders
 		Shader* pVertexShader = pDevice->CreateShader("main",VK_SHADER_STAGE_VERTEX_BIT,pVertexShaderSPIRVBytes, vertexShaderSPIRVByteCount);
@@ -128,58 +131,34 @@ namespace Oksijen
 		//Create general use-case fence
 		Fence* pCmdFence = pDevice->CreateFence(false);
 
-		//Allocate memory
-		GraphicsMemory* pHostMemory = pDevice->AllocateMemory(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, MB_TO_BYTE(50));
-		GraphicsMemory* pDeviceMemory = pDevice->AllocateMemory(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, MB_TO_BYTE(50));
+		//Load mesh
+		std::string meshPath = RES_PATH;
+		meshPath += "/WoodTarpMesh.fbx";
+		std::vector<MeshImportData> importedMeshes;
+		MeshLoader::LoadMesh(meshPath,aiProcess_Triangulate | aiProcess_FlipUVs, importedMeshes);
 
-		//Create host buffer
-		GraphicsBuffer* pHostBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, MB_TO_BYTE(49));
-
-		//Create vertex buffer
 		struct Vertex
 		{
 			float X;
 			float Y;
+			float Z;
 
 			float U;
 			float V;
 		};
-		constexpr Vertex vertexes[] =
+
+		//Get imported mesh
+		const MeshImportData& importedMesh = importedMeshes[0];
+		const unsigned long long meshVertexDataSize = importedMesh.VertexCount * sizeof(Vertex);
+		const unsigned long long meshIndexDataSize = importedMesh.Triangles.size() * sizeof(unsigned int);
+
+		std::vector<Vertex> vertexes(importedMesh.VertexCount);
+		for (unsigned long long i = 0; i < importedMesh.VertexCount; i++)
 		{
-			{-0.5f,-0.5f,0,0},
-			{-0.5f,0.5f,0.0f,1.0f},
-			{0.5f,0.5f,1.0f,1.0f},
-			{0.5f,-0.5f,1.0f,0.0f},
-		};
-
-		GraphicsBuffer* pVertexBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(vertexes));
-
-		//Update vertex buffer
-		pDevice->UpdateHostBuffer(pHostBuffer, (const unsigned char*)vertexes, sizeof(vertexes), 0);
-		pCmdList->Begin();
-		pCmdList->CopyBufferBuffer(pHostBuffer, pVertexBuffer, 0, 0,sizeof(vertexes));
-		pCmdList->End();
-		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
-		pCmdFence->Wait();
-		pCmdFence->Reset();
-
-		//Create index buffer
-		constexpr unsigned short indexes[] =
-		{
-			0,1,2,
-			0,2,3
-		};
-
-		GraphicsBuffer* pIndexBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(indexes));
-
-		//Update index buffer
-		pDevice->UpdateHostBuffer(pHostBuffer, (const unsigned char*)indexes, sizeof(indexes), 0);
-		pCmdList->Begin();
-		pCmdList->CopyBufferBuffer(pHostBuffer, pIndexBuffer, 0, 0, sizeof(indexes));
-		pCmdList->End();
-		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
-		pCmdFence->Wait();
-		pCmdFence->Reset();
+			const VertexVector3D& pos = importedMesh.Positions[i];
+			const VertexVector2D& uv = importedMesh.Uvs[0][i];
+			vertexes[i] = { pos.X / 70.0f,pos.Y / 70.0f,pos.Z / 70.0f,uv.X,uv.Y };
+		}
 
 		//Load texture
 		unsigned long long textureDataSize = 0;
@@ -187,12 +166,52 @@ namespace Oksijen
 		unsigned int textureHeight = 0;
 		unsigned int textureChannelCount = 0;
 		std::string texturePath = RES_PATH;
-		texturePath += "/Smiley.png";
+		texturePath += "/WoodTarpAlbedo.jpg";
 		unsigned char* pTextureData = nullptr;
-		DEV_ASSERT(TextureLoader::LoadFromPath(texturePath,4,&pTextureData,textureDataSize,textureWidth,textureHeight, textureChannelCount), "Main", "Failed to load the test texture");
+		DEV_ASSERT(TextureLoader::LoadFromPath(texturePath, 4, &pTextureData, textureDataSize, textureWidth, textureHeight, textureChannelCount), "Main", "Failed to load the test texture");
+
+		//Allocate memory
+		const unsigned long long depthStencilTextureMemory = pWindow->GetWidth() * pWindow->GetHeight() * 4;
+		const unsigned long long requiredAppMemory =  meshVertexDataSize + meshIndexDataSize + textureDataSize + depthStencilTextureMemory + MB_TO_BYTE(1);
+		GraphicsMemory* pHostMemory = pDevice->AllocateMemory(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, requiredAppMemory);
+		GraphicsMemory* pDeviceMemory = pDevice->AllocateMemory(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, requiredAppMemory);
+
+		//Create host buffer
+		GraphicsBuffer* pHostBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, requiredAppMemory - MB_TO_BYTE(1));
+
+		//Create vertex buffer
+		GraphicsBuffer* pVertexBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, meshVertexDataSize);
+
+		//Update vertex buffer
+		pDevice->UpdateHostBuffer(pHostBuffer, (const unsigned char*)vertexes.data(), meshVertexDataSize, 0);
+		pCmdList->Begin();
+		pCmdList->CopyBufferBuffer(pHostBuffer, pVertexBuffer, 0, 0, meshVertexDataSize);
+		pCmdList->End();
+		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+		pCmdFence->Wait();
+		pCmdFence->Reset();
+
+		//Create index buffer
+		GraphicsBuffer* pIndexBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, meshIndexDataSize);
+
+		//Update index buffer
+		pDevice->UpdateHostBuffer(pHostBuffer, (const unsigned char*)importedMesh.Triangles.data(), meshIndexDataSize, 0);
+		pCmdList->Begin();
+		pCmdList->CopyBufferBuffer(pHostBuffer, pIndexBuffer, 0, 0, meshIndexDataSize);
+		pCmdList->End();
+		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+		pCmdFence->Wait();
+		pCmdFence->Reset();
+
+		//Create uniform buffer
+		struct UniformBufferData
+		{
+			glm::mat4x4 Mvp;
+		};
+		GraphicsBuffer* pUniformBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(UniformBufferData));
 
 		//Create texture
-		Texture* pTexture = pDevice->CreateTexture(
+		Texture* pAlbedoTexture = pDevice->CreateTexture(
 			pDeviceMemory,
 			VK_IMAGE_TYPE_2D,
 			VK_FORMAT_R8G8B8A8_UNORM,
@@ -206,8 +225,9 @@ namespace Oksijen
 
 		//Update texture
 		pDevice->UpdateHostBuffer(pHostBuffer, pTextureData, textureDataSize, 0);
+
 		pCmdList->Begin();
-		pCmdList->SetPipelineTextureBarrier(pTexture,
+		pCmdList->SetPipelineTextureBarrier(pAlbedoTexture,
 			VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			VK_QUEUE_GRAPHICS_BIT,VK_QUEUE_GRAPHICS_BIT,
 			VK_IMAGE_ASPECT_COLOR_BIT,0,0,
@@ -216,7 +236,7 @@ namespace Oksijen
 			VkDependencyFlags());
 
 		pCmdList->CopyBufferTexture(
-			pHostBuffer, pTexture,
+			pHostBuffer, pAlbedoTexture,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			0, 0, 0,
 			VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1,
@@ -224,7 +244,7 @@ namespace Oksijen
 			textureWidth, textureHeight, 1
 		);
 
-		pCmdList->SetPipelineTextureBarrier(pTexture,
+		pCmdList->SetPipelineTextureBarrier(pAlbedoTexture,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
 			VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
@@ -238,13 +258,49 @@ namespace Oksijen
 		pCmdFence->Reset();
 
 		//Create texture view
-		TextureView* pTextureView = pDevice->CreateTextureView(
-			pTexture,
+		TextureView* pAlbedoTextureView = pDevice->CreateTextureView(
+			pAlbedoTexture,
 			0, 0,
 			VK_IMAGE_VIEW_TYPE_2D,
 			VK_FORMAT_R8G8B8A8_UNORM,
 			{ VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY},
 			VK_IMAGE_ASPECT_COLOR_BIT);
+
+		//Create depth texture
+		Texture* pDepthTexture = pDevice->CreateTexture(
+			pDeviceMemory,
+			VK_IMAGE_TYPE_2D,
+			VK_FORMAT_D32_SFLOAT,
+			pWindow->GetWidth(), pWindow->GetHeight(), 1,
+			1, 1,
+			VK_SAMPLE_COUNT_1_BIT,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+			VK_SHARING_MODE_EXCLUSIVE,
+			VK_IMAGE_LAYOUT_UNDEFINED);
+
+		//Set texture layout
+		pCmdList->Begin();
+		pCmdList->SetPipelineTextureBarrier(
+			pDepthTexture,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+			VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0,
+			VK_ACCESS_NONE, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VkDependencyFlags());
+
+		pCmdList->End();
+		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+		pCmdFence->Wait();
+		pCmdFence->Reset();
+
+		//Create depth texture view
+		TextureView* pDepthTextureView = pDevice->CreateTextureView(
+			pDepthTexture,
+			0, 0,
+			VK_IMAGE_VIEW_TYPE_2D,
+			VK_FORMAT_D32_SFLOAT, { VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY },
+			VK_IMAGE_ASPECT_DEPTH_BIT);
 
 		//Create sampler
 		Sampler* pSampler = pDevice->CreateSampler(
@@ -260,8 +316,8 @@ namespace Oksijen
 		);
 
 		//Create descriptor pool
-		constexpr VkDescriptorType descriptorTypes[2] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLER};
-		constexpr unsigned int descriptorTypeCounts[2] = { 1,1 };
+		constexpr VkDescriptorType descriptorTypes[] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLER};
+		constexpr unsigned int descriptorTypeCounts[] = { 1,1,1 };
 		DescriptorPool* pDescriptorPool = pDevice->CreateDescriptorPool(
 			VkDescriptorPoolCreateFlags(),
 			1,
@@ -270,35 +326,17 @@ namespace Oksijen
 			2);
 
 		//Create descriptor layout
-		constexpr unsigned int descriptorBindingIndexes[2] = { 0,1 };
-		constexpr VkDescriptorType descriptorLayoutTypes[2] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLER };
-		constexpr unsigned int descriptorLayoutDescriptorCounts[2] = { 1,1 };
-		constexpr VkShaderStageFlags descriptorLayoutShaderStageFlags[2] = { VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
+		constexpr unsigned int descriptorBindingIndexes[3] = { 0,1,2 };
+		constexpr VkDescriptorType descriptorLayoutTypes[3] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLER };
+		constexpr unsigned int descriptorLayoutDescriptorCounts[3] = { 1,1,1 };
+		constexpr VkShaderStageFlags descriptorLayoutShaderStageFlags[3] = {VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
 		DescriptorSetLayout* pDescriptorLayout = pDevice->CreateDescriptorSetLayout(
 			descriptorBindingIndexes,
 			descriptorLayoutTypes,
 			descriptorLayoutDescriptorCounts,
 			descriptorLayoutShaderStageFlags,
-			2
+			3
 		);
-
-		//Allocate descriptor set
-		DescriptorSet* pDescriptorSet = pDevice->AllocateDescriptorSet(pDescriptorPool,pDescriptorLayout);
-
-		//Update descriptor set
-		pDevice->UpdateDescriptorSetTextureSampler(
-			pDescriptorSet,
-			0, 0,
-			VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-			pTextureView, nullptr,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-		pDevice->UpdateDescriptorSetTextureSampler(pDescriptorSet,
-			1,0,
-			VK_DESCRIPTOR_TYPE_SAMPLER,
-			nullptr,
-			pSampler,
-			VK_IMAGE_LAYOUT_UNDEFINED);
 
 		//Create pipeline
 		VkPipelineVertexInputStateCreateInfo vertexInputState = {};
@@ -315,7 +353,7 @@ namespace Oksijen
 
 		VkVertexInputAttributeDescription posAttributeDesc = {};
 		posAttributeDesc.binding = 0;
-		posAttributeDesc.format = VK_FORMAT_R32G32_SFLOAT;
+		posAttributeDesc.format = VK_FORMAT_R32G32B32_SFLOAT;
 		posAttributeDesc.location = 0;
 		posAttributeDesc.offset = 0;
 
@@ -323,7 +361,7 @@ namespace Oksijen
 		uvAttributeDesc.binding = 0;
 		uvAttributeDesc.format = VK_FORMAT_R32G32_SFLOAT;
 		uvAttributeDesc.location = 1;
-		uvAttributeDesc.offset = sizeof(float) * 2;
+		uvAttributeDesc.offset = sizeof(float) * 3;
 
 		VkVertexInputAttributeDescription attributes[] = { posAttributeDesc,uvAttributeDesc };
 		vertexInputState.vertexAttributeDescriptionCount = 2;
@@ -339,14 +377,14 @@ namespace Oksijen
 
 		VkPipelineRasterizationStateCreateInfo rasterizerDesc = {};
 		rasterizerDesc.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rasterizerDesc.cullMode = VK_CULL_MODE_NONE;
+		rasterizerDesc.cullMode = VK_CULL_MODE_BACK_BIT;
 		rasterizerDesc.depthBiasClamp = 0;
 		rasterizerDesc.depthBiasConstantFactor = 0;
 		rasterizerDesc.depthBiasEnable = VK_FALSE;
 		rasterizerDesc.depthBiasSlopeFactor = 0;
 		rasterizerDesc.depthClampEnable = VK_FALSE;
 		rasterizerDesc.flags = 0;
-		rasterizerDesc.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		rasterizerDesc.frontFace = VK_FRONT_FACE_CLOCKWISE;
 		rasterizerDesc.lineWidth = 1.0f;
 		rasterizerDesc.polygonMode = VK_POLYGON_MODE_FILL;
 		rasterizerDesc.rasterizerDiscardEnable = VK_FALSE;
@@ -368,9 +406,9 @@ namespace Oksijen
 		depthStencilDesc.stencilTestEnable = VK_FALSE;
 		depthStencilDesc.front = {};
 		depthStencilDesc.back = {};
-		depthStencilDesc.depthTestEnable = VK_FALSE;
-		depthStencilDesc.depthWriteEnable = VK_FALSE;
-		depthStencilDesc.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+		depthStencilDesc.depthTestEnable = VK_TRUE;
+		depthStencilDesc.depthWriteEnable = VK_TRUE;
+		depthStencilDesc.depthCompareOp = VK_COMPARE_OP_LESS;
 		depthStencilDesc.depthBoundsTestEnable = VK_FALSE;
 		depthStencilDesc.maxDepthBounds = 1.0f;
 		depthStencilDesc.minDepthBounds = 0.0f;
@@ -396,7 +434,7 @@ namespace Oksijen
 		renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
 		renderingInfo.colorAttachmentCount = 1;
 		renderingInfo.pColorAttachmentFormats = &colorAttachmentFormat;
-		renderingInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+		renderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
 		renderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 		renderingInfo.pNext = nullptr;
 
@@ -435,6 +473,35 @@ namespace Oksijen
 			nullptr,
 			nullptr, 0,
 			&renderingInfo);
+
+		//Allocate descriptor set
+		DescriptorSet* pDescriptorSet = pDevice->AllocateDescriptorSet(pDescriptorPool, pDescriptorLayout);
+
+		//Update descriptor set
+		pDevice->UpdateDescriptorSetBuffer(
+			pDescriptorSet,
+			0,
+			0,
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			pUniformBuffer,
+			0,
+			pUniformBuffer->GetSize()
+		);
+
+		pDevice->UpdateDescriptorSetTextureSampler(
+			pDescriptorSet,
+			1, 0,
+			VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			pAlbedoTextureView, nullptr,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+		pDevice->UpdateDescriptorSetTextureSampler(pDescriptorSet,
+			2, 0,
+			VK_DESCRIPTOR_TYPE_SAMPLER,
+			nullptr,
+			pSampler,
+			VK_IMAGE_LAYOUT_UNDEFINED);
+
 
 		//Create surface
 		Surface* pSurface = pInstance->CreateSurface(pWindow);
@@ -524,7 +591,13 @@ namespace Oksijen
 		pCmdFence->Wait();
 		pCmdFence->Reset();
 
+		//Application loop
 		bool bRed = true;
+		const glm::vec3 cubePosition = { 0,0,0 };
+		const glm::vec3 cubeScale = { 1,1,1 };
+		glm::vec3 cubeRotation = { 0,0,0 };
+		const glm::vec3 cameraPosition = { 0,0,-5 };
+		const glm::vec3 relativeUp = { 0,1,0 };
 		while (pWindow->IsActive())
 		{
 			// poll window events
@@ -534,6 +607,24 @@ namespace Oksijen
 				break;
 			}
 
+			//Update cube transform
+			cubeRotation.y += 0.1f;
+			cubeRotation.x += 0.15f;
+			cubeRotation.z += 0.08f;
+			const glm::mat4x4 projection = glm::perspective(glm::radians(60.0f), pWindow->GetWidth() / (float)pWindow->GetHeight(), 0.001f, 7.0f);
+			const glm::mat4x4 view = glm::lookAt(cameraPosition, cubePosition, relativeUp);
+			glm::mat4x4 model(1);
+			model = glm::translate(model, cubePosition);
+			model = glm::scale(model, cubeScale);
+			model = glm::rotate(model, glm::radians(cubeRotation.x), { 1,0,0 });
+			model = glm::rotate(model, glm::radians(cubeRotation.y), { 0,1,0 });
+			model = glm::rotate(model, glm::radians(cubeRotation.z), { 0,0,1 });
+			const glm::mat4x4 mvp = glm::transpose(projection * view * model);
+			const UniformBufferData uniformBufferData = { mvp };
+
+			//Update host stage buffer
+			pDevice->UpdateHostBuffer(pHostBuffer, (const unsigned char*)&uniformBufferData, sizeof(uniformBufferData), 0);
+
 			//Acquire image index
 			const unsigned int swapchainImageIndex = pSwapchain->AcquireImageIndex(pPresentImageAcquireFence, nullptr);
 			pPresentImageAcquireFence->Wait();
@@ -541,6 +632,9 @@ namespace Oksijen
 
 			//Begin cmd
 			pCmdList->Begin();
+
+			//Copy host to device (transform uniform buffer)
+			pCmdList->CopyBufferBuffer(pHostBuffer, pUniformBuffer, 0, 0, sizeof(uniformBufferData));
 
 			//Set pipeline
 			pCmdList->SetPipeline(pPipeline);
@@ -550,7 +644,7 @@ namespace Oksijen
 			pCmdList->SetVertexBuffers((const GraphicsBuffer**)&pVertexBuffer, 1, 0, &vertexBufferOffsets);
 
 			//Set index buffer
-			pCmdList->SetIndexBuffer(pIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+			pCmdList->SetIndexBuffer(pIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
 			//Pre barrier
 			pCmdList->SetPipelineTextureBarrier(
@@ -592,11 +686,15 @@ namespace Oksijen
 				VK_ATTACHMENT_STORE_OP_STORE,
 				colorAttachmentClearValue);
 
+			VkClearValue depthClearValue = {};
+			depthClearValue.depthStencil.depth = 1.0f;
+			pCmdList->SetDynamicRenderingDepthAttachment(pDepthTextureView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, depthClearValue);
+
 			//Start dynamic rendering
 			pCmdList->BeginDynamicRendering(0, 1, 0, 0, pWindow->GetWidth(), pWindow->GetHeight());
 
 			//Draw
-			pCmdList->DrawIndexed(6, 1, 0, 0, 0);
+			pCmdList->DrawIndexed(importedMesh.Triangles.size(), 1, 0, 0, 0);
 
 			//End dynamic rendering
 			pCmdList->EndDynamicRendering();

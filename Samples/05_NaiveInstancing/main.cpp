@@ -297,7 +297,7 @@ namespace Oksijen
 		std::string texturePath = RES_PATH;
 		texturePath += "/Smiley.png";
 		unsigned char* pTextureData = nullptr;
-		DEV_ASSERT(TextureLoader::LoadFromPath(texturePath,&pTextureData,textureDataSize,textureWidth,textureHeight, textureChannelCount), "Main", "Failed to load the test texture");
+		DEV_ASSERT(TextureLoader::LoadFromPath(texturePath,4,&pTextureData,textureDataSize,textureWidth,textureHeight, textureChannelCount), "Main", "Failed to load the test texture");
 
 		//Create texture
 		Texture* pTexture = pDevice->CreateTexture(

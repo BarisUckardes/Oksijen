@@ -3,13 +3,13 @@
 
 namespace Oksijen
 {
-	bool TextureLoader::LoadFromPath(const std::string& path, unsigned char** ppDataOut, unsigned long long& dataSizeOut, unsigned int& widthOut, unsigned int& heightOut, unsigned int& channelCountOut)
+	bool TextureLoader::LoadFromPath(const std::string& path,const unsigned char requestedChannelCount, unsigned char** ppDataOut, unsigned long long& dataSizeOut, unsigned int& widthOut, unsigned int& heightOut, unsigned int& channelCountOut)
 	{
 		int width = 0;
 		int height = 0;
 		int channelCount = 0;
 
-		unsigned char* pData = stbi_load(path.c_str(), &width, &height, &channelCount, 4);
+		unsigned char* pData = stbi_load(path.c_str(), &width, &height, &channelCount, requestedChannelCount);
 
 		if (pData == nullptr)
 		{
@@ -24,7 +24,7 @@ namespace Oksijen
 		*ppDataOut = pData;
 		widthOut = width;
 		heightOut = height;
-		dataSizeOut = width * height * channelCount;
+		dataSizeOut = width * height * requestedChannelCount;
 		channelCountOut = channelCount;
 
 		return true;

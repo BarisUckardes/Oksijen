@@ -6,7 +6,8 @@ project("Oksijen")
 
 # ------------------ CXX FLAGS ---------------------
 if(POLICY CMP0091)
-  cmake_policy(SET CMP0091 NEW) 
+  cmake_policy(SET CMP0141 NEW)
+  cmake_policy(SET CMP0077 NEW)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -33,5 +34,6 @@ add_subdirectory("Samples/04_RotatingCube")
 add_subdirectory("Samples/05_NaiveInstancing")
 add_subdirectory("Samples/06_ComputeTexture")
 add_subdirectory("Samples/07_ImGui")
+add_subdirectory("Samples/08_SimpleAssimpImporter")
 
 # --------------------------------------------------

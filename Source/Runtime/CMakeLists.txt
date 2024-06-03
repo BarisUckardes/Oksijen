@@ -16,15 +16,15 @@ endif()
 # ---------------------- CMAKE FETCH -------------------------
 FetchContent_MakeAvailable(stbi)
 FetchContent_MakeAvailable(yaml-cpp)
-#FetchContent_MakeAvailable(assimp)
 FetchContent_MakeAvailable(spirv-reflect)
 FetchContent_MakeAvailable(imgui)
+FetchContent_MakeAvailable(assimp)
 # ------------------------------------------------------------
 
 # ---------------------- FILE ADDITION -----------------------
 file(GLOB_RECURSE SUBDIRECTORIES "${CMAKE_SOURCE_DIR}/Source/Runtime/*.cpp" "${CMAKE_SOURCE_DIR}/Source/Runtime/*.h")
 source_group(TREE "${CMAKE_SOURCE_DIR}/Source/Runtime" FILES ${SUBDIRECTORIES})
-add_library(Runtime main.cpp ${SUBDIRECTORIES})
+add_library(Runtime STATIC main.cpp ${SUBDIRECTORIES})
 # ------------------------------------------------------------
 
 # ---------------------- IMGUI FILES -------------------------
@@ -35,16 +35,13 @@ add_library(imgui STATIC ${IMGUI_FILES})
 
 # ------------------- INCLUDE DIRECTORIES --------------------
 target_include_directories(Runtime PRIVATE "${CMAKE_SOURCE_DIR}/Source")
-target_include_directories(Runtime PUBLIC "${yaml-cpp_SOURCE_DIR}/include")
-target_include_directories(Runtime PUBLIC "${spirv-reflect_SOURCE_DIR}")
 target_include_directories(Runtime PUBLIC "${imgui_SOURCE_DIR}")
 # ------------------------------------------------------------
 
 # ------------------- LINK -----------------------------------
+target_link_libraries(Runtime PUBLIC assimp)
 target_link_libraries(Runtime PUBLIC yaml-cpp)
 target_link_libraries(Runtime PUBLIC imgui)
-#target_link_libraries(Runtime PUBLIC assimp)
-target_link_libraries(Runtime PUBLIC spirv-reflect-static)
 
 if(CMAKE_BUILD_TYPE MATCHES "Debug")
     target_link_libraries(Runtime PUBLIC "${Vulkan_SDK_DIR}/dxcompilerd.lib")
@@ -80,6 +77,13 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 endif ()
 # ------------------------------------------------------------
 
+# ----------------- SPIRV-Reflect IMPLEMENTATION -------------
+if(spirv-reflect_POPULATED)
+	target_include_directories(Runtime PUBLIC ${spirv-reflect_SOURCE_DIR})
+	target_link_libraries(Runtime PUBLIC spirv-reflect-static)
+endif()
+# ------------------------------------------------------------
+
 # ----------------- STB IMAGE IMPLEMENTATION -----------------
 if (stbi_POPULATED) 
     target_compile_definitions(Runtime PUBLIC STB_IMAGE_IMPLEMENTATION=1)
@@ -90,15 +94,9 @@ endif ()
 # ------------------------------------------------------------
 
 # ------------------- VULKAN IMPLEMENTATION ------------------
-target_include_directories(Runtime PUBLIC "${Vulkan_INCLUDE_DIRS}")
 if(Vulkan_FOUND)
     target_include_directories(Runtime PUBLIC "${Vulkan_INCLUDE_DIRS}")
     target_link_libraries(Runtime PUBLIC "${Vulkan_SDK_DIR}/vulkan-1.lib")
-endif()
-
-if(spirv-reflect_POPULATED)
-	target_include_directories(Runtime PUBLIC ${spirv-reflect_SOURCE_DIR})
-	target_link_libraries(Runtime PUBLIC spirv-reflect-static)
 endif()
 # ------------------------------------------------------------
 
