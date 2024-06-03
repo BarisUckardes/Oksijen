@@ -48,7 +48,7 @@ namespace Oksijen
 		mMemoryOffset = memoryOffset;
 		mAlignedMemoryOffset = memoryAlignedOffset;
 
-		DEV_LOG("Texture", "Allocated %.2fMB", (requirements.size + requirements.alignment) / 1000000.0f);
+		DEV_LOG("Texture", "Allocated %.4fMB", (requirements.size + requirements.alignment) / 1000000.0f);
 	}
 	Texture::Texture(const VkImage swapchainImage, const unsigned int width, const unsigned int height, const unsigned int arrayLevels) 
 		: mImage(swapchainImage),mLogicalDevice(VK_NULL_HANDLE),mTargetMemory(nullptr), mMemoryOffset(uint64_max), mAlignedMemoryOffset(uint64_max),mMipLevels(1),mArrayLevels(arrayLevels),mSwapchainImage(true),mWidth(width),mHeight(height),mDepth(1)

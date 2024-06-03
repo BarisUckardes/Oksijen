@@ -39,6 +39,8 @@ namespace Oksijen
 		initialBlock.bOwned = false;
 		initialBlock.SizeInBytes = size;
 		mBlocks.push_back(initialBlock);
+
+		DEV_LOG("GraphicsMemory", "Allocated %.4fMB", size / 1000000.0f);
 	}
 	GraphicsMemory::~GraphicsMemory()
 	{

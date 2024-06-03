@@ -27,6 +27,7 @@ endif ()
 
 # ------------------ SUBDIRECTORIES ----------------
 add_subdirectory("Source/Runtime")
+
 add_subdirectory("Samples/01_RedBlueAlternating")
 add_subdirectory("Samples/02_HelloTriangle")
 add_subdirectory("Samples/03_TexturedQuad")
@@ -35,5 +36,7 @@ add_subdirectory("Samples/05_NaiveInstancing")
 add_subdirectory("Samples/06_ComputeTexture")
 add_subdirectory("Samples/07_ImGui")
 add_subdirectory("Samples/08_SimpleAssimpImporter")
+add_subdirectory("Samples/09_SimpleLighting")
+add_subdirectory("Samples/10_SimplePBR")
 
 # --------------------------------------------------
