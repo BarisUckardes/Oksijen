@@ -135,7 +135,8 @@ namespace Oksijen
 		std::string meshPath = RES_PATH;
 		meshPath += "/WoodTarpMesh.fbx";
 		std::vector<MeshImportData> importedMeshes;
-		MeshLoader::LoadMesh(meshPath,aiProcess_Triangulate | aiProcess_FlipUVs, importedMeshes);
+		std::vector<MaterialImportData> importedMaterials;
+		MeshLoader::LoadMesh(meshPath,aiProcess_Triangulate | aiProcess_FlipUVs, importedMeshes, importedMaterials);
 
 		struct Vertex
 		{
@@ -164,7 +165,7 @@ namespace Oksijen
 		unsigned long long textureDataSize = 0;
 		unsigned int textureWidth = 0;
 		unsigned int textureHeight = 0;
-		unsigned int textureChannelCount = 0;
+		unsigned char textureChannelCount = 0;
 		std::string texturePath = RES_PATH;
 		texturePath += "/WoodTarpAlbedo.jpg";
 		unsigned char* pTextureData = nullptr;

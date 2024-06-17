@@ -185,7 +185,7 @@ namespace Oksijen
 		unsigned long long textureDataSize = 0;
 		unsigned int textureWidth = 0;
 		unsigned int textureHeight = 0;
-		unsigned int textureChannelCount = 0;
+		unsigned char textureChannelCount = 0;
 		std::string texturePath = RES_PATH;
 		texturePath += "/Smiley.png";
 		unsigned char* pTextureData = nullptr;

@@ -248,7 +248,8 @@ namespace Oksijen
 		std::string meshPath = RES_PATH;
 		meshPath += "/WoodTarpMesh.fbx";
 		std::vector<MeshImportData> importedMeshes;
-		MeshLoader::LoadMesh(meshPath,aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_FlipUVs, importedMeshes);
+		std::vector<MaterialImportData> importedMaterials;
+		MeshLoader::LoadMesh(meshPath,aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_FlipUVs, importedMeshes, importedMaterials);
 
 		struct Vertex
 		{
@@ -279,7 +280,7 @@ namespace Oksijen
 		unsigned long long albedoTextureDataSize = 0;
 		unsigned int albedoTextureWidth = 0;
 		unsigned int albedoTextureHeight = 0;
-		unsigned int albedoTextureChannelCount = 0;
+		unsigned char albedoTextureChannelCount = 0;
 		std::string albedoTexturePath = RES_PATH;
 		albedoTexturePath += "/WoodTarpAlbedo.jpg";
 		unsigned char* pAlbedoTextureData = nullptr;
@@ -288,7 +289,7 @@ namespace Oksijen
 		unsigned long long normalTextureDataSize = 0;
 		unsigned int normalTextureWidth = 0;
 		unsigned int normalTextureHeight = 0;
-		unsigned int normalTextureChannelCount = 0;
+		unsigned char normalTextureChannelCount = 0;
 		std::string normalTexturePath = RES_PATH;
 		normalTexturePath += "/WoodTarpNormal.jpg";
 		unsigned char* pNormalTextureData = nullptr;
@@ -297,7 +298,7 @@ namespace Oksijen
 		unsigned long long roughnessTextureDataSize = 0;
 		unsigned int roughnessTextureWidth = 0;
 		unsigned int roughnessTextureHeight = 0;
-		unsigned int roughnessTextureChannelCount = 0;
+		unsigned char roughnessTextureChannelCount = 0;
 		std::string roughnessTexturePath = RES_PATH;
 		roughnessTexturePath += "/WoodTarpRoughness.jpg";
 		unsigned char* pRoughnessTextureData = nullptr;

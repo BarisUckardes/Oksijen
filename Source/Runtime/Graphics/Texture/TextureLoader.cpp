@@ -3,7 +3,7 @@
 
 namespace Oksijen
 {
-	bool TextureLoader::LoadFromPath(const std::string& path,const unsigned char requestedChannelCount, unsigned char** ppDataOut, unsigned long long& dataSizeOut, unsigned int& widthOut, unsigned int& heightOut, unsigned int& channelCountOut)
+	bool TextureLoader::LoadFromPath(const std::string& path,const unsigned char requestedChannelCount, unsigned char** ppDataOut, unsigned long long& dataSizeOut, unsigned int& widthOut, unsigned int& heightOut, unsigned char& channelCountOut)
 	{
 		int width = 0;
 		int height = 0;

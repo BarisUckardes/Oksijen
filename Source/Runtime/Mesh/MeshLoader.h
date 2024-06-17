@@ -39,10 +39,17 @@ namespace Oksijen
 		unsigned int MaterialGroupIndex;
 	};
 
-	class MeshLoader final
+	struct RUNTIME_API MaterialImportData final
+	{
+		std::string BaseColorTextureName;
+		std::string NormalTextureName;
+		std::string RoughnessTextureName;
+	};
+
+	class RUNTIME_API MeshLoader final
 	{
 	public:
-		static void LoadMesh(const std::string& path,const unsigned int processSteps,std::vector<MeshImportData>& importedMeshes);
+		static void LoadMesh(const std::string& path,const unsigned int processSteps,std::vector<MeshImportData>& importedMeshes,std::vector<MaterialImportData>& importedMaterials);
 	public:
 		MeshLoader() = delete;
 		~MeshLoader() = delete;
