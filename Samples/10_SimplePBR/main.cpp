@@ -907,7 +907,7 @@ namespace Oksijen
 		pCmdFence->Reset();
 
 		//Scene variables
-		const glm::vec3 cubePosition = { 0,3,0 };
+		const glm::vec3 cubePosition = { 0,0,0 };
 		const glm::vec3 cubeScale = { 1,1,1 };
 		glm::vec3 cubeRotation = { 0,0,0 };
 		const glm::vec3 cameraPosition = { 0,0,-3 };
@@ -935,9 +935,9 @@ namespace Oksijen
 			}
 
 			//Update cube transform
-			cubeRotation.y += 0.1f/2.0f;
-			cubeRotation.x += 0.15f/2.0f;
-			cubeRotation.z += 0.08f/2.0f;
+			//cubeRotation.y += 0.1f/2.0f;
+			//cubeRotation.x += 0.15f/2.0f;
+			//cubeRotation.z += 0.08f/2.0f;
 			const glm::mat4x4 projection = glm::perspective(glm::radians(60.0f), pWindow->GetWidth() / (float)pWindow->GetHeight(), 0.001f, 7.0f);
 			const glm::mat4x4 view = glm::lookAt(cameraPosition, cubePosition, relativeUp);
 			glm::mat4x4 model(1);

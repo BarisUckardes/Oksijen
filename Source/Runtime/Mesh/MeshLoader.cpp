@@ -33,8 +33,16 @@ namespace Oksijen
 						pMaterial->GetTexture(aiTextureType_DIFFUSE, 0, &textureName);
 
 						materialData.BaseColorTextureName = textureName.C_Str();
+					}
+				}
+				{
+					const unsigned int count = pMaterial->GetTextureCount(aiTextureType_BASE_COLOR);
+					if (count != 0)
+					{
+						aiString textureName;
+						pMaterial->GetTexture(aiTextureType_BASE_COLOR, 0, &textureName);
 
-						DEV_LOG("MeshLoader", "Found base color texture: %s", textureName.C_Str());
+						materialData.BaseColorTextureName = textureName.C_Str();
 					}
 				}
 
@@ -47,8 +55,6 @@ namespace Oksijen
 						pMaterial->GetTexture(aiTextureType_NORMALS, 0, &textureName);
 
 						materialData.NormalTextureName = textureName.C_Str();
-
-						DEV_LOG("MeshLoader", "Found normal texture: %s", textureName.C_Str());
 					}
 				}
 
@@ -61,8 +67,6 @@ namespace Oksijen
 						pMaterial->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &textureName);
 
 						materialData.RoughnessTextureName = textureName.C_Str();
-
-						DEV_LOG("MeshLoader", "Found roughness texture: %s", textureName.C_Str());
 					}
 				}
 

@@ -24,6 +24,7 @@ namespace Oksijen
 		Texture(const VkImage swapchainImage,const unsigned int width,const unsigned int height,const unsigned int arrayLevels);
 		~Texture();
 
+		FORCEINLINE VkFormat GetFormat() const noexcept { return mFormat; }
 		FORCEINLINE unsigned int GetWidth() const noexcept { return mWidth; }
 		FORCEINLINE unsigned int GetHeight() const noexcept { return mHeight; }
 		FORCEINLINE unsigned int GetDepth() const noexcept { return mDepth; }
@@ -34,6 +35,7 @@ namespace Oksijen
 		FORCEINLINE VkImage GetImage() const noexcept { return mImage; }
 	private:
 		const VkDevice mLogicalDevice;
+		const VkFormat mFormat;
 		const unsigned int mWidth;
 		const unsigned int mHeight;
 		const unsigned int mDepth;

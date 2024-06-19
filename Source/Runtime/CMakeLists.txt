@@ -19,6 +19,7 @@ FetchContent_MakeAvailable(yaml-cpp)
 FetchContent_MakeAvailable(spirv-reflect)
 FetchContent_MakeAvailable(imgui)
 FetchContent_MakeAvailable(assimp)
+FetchContent_MakeAvailable(glm)
 # ------------------------------------------------------------
 
 # ---------------------- FILE ADDITION -----------------------
@@ -64,10 +65,6 @@ else()
 endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    target_link_libraries(Runtime PRIVATE d3d12.lib)
-    target_link_libraries(Runtime PRIVATE d3d11.lib)
-    target_link_libraries(Runtime PRIVATE dxgi.lib)
-    target_link_libraries(Runtime PRIVATE d3dcompiler.lib)
     target_link_libraries(Runtime PRIVATE Shlwapi.lib)
     target_link_libraries(Runtime PRIVATE Comctl32.lib)
     target_link_libraries(Runtime PRIVATE dinput8.lib)
@@ -91,6 +88,13 @@ if (stbi_POPULATED)
 else ()
     target_compile_definitions(Runtime PUBLIC STB_IMAGE_IMPLEMENTATION=0)
 endif ()
+# ------------------------------------------------------------
+
+# ----------------- GLM IMPLEMENTATION -----------------------
+if(glm_POPULATED)
+	target_include_directories(Runtime PUBLIC ${glm_SOURCE_DIR})
+	target_link_libraries(Runtime PUBLIC glm)
+endif()
 # ------------------------------------------------------------
 
 # ------------------- VULKAN IMPLEMENTATION ------------------
