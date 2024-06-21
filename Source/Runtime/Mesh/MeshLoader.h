@@ -37,6 +37,24 @@ namespace Oksijen
 		std::vector<unsigned int> Triangles;
 		unsigned long long VertexCount;
 		unsigned int MaterialGroupIndex;
+
+		void Free()
+		{
+			Positions.clear();
+			Positions.shrink_to_fit();
+			Tangents.clear();
+			Tangents.shrink_to_fit();
+			Bitangents.clear();
+			Bitangents.shrink_to_fit();
+			Normals.clear();
+			Normals.shrink_to_fit();
+			Uvs.clear();
+			Uvs.shrink_to_fit();
+			Colors.clear();
+			Colors.shrink_to_fit();
+			Triangles.clear();
+			Triangles.shrink_to_fit();
+		}
 	};
 
 	struct RUNTIME_API MaterialImportData final

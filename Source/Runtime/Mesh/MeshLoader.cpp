@@ -13,6 +13,7 @@ namespace Oksijen
 		if (pScene == nullptr)
 			return;
 		
+		//Get materials
 		if (pScene->HasMaterials())
 		{
 			for (unsigned int i = 0; i < pScene->mNumMaterials; i++)
