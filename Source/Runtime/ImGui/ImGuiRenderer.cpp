@@ -228,7 +228,7 @@ namespace Oksijen
 		clearColorValue.float32[2] = 0.0f;
 		clearColorValue.float32[3] = 1.0f;
 
-		mCmdList->AddDynamicRenderingColorAttachment(pTargetView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, clearColorValue);
+		mCmdList->AddDynamicRenderingColorAttachment(pTargetView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, clearColorValue);
 
 		mCmdList->BeginDynamicRendering(0, 1, 0, 0, pTargetTexture->GetWidth(), pTargetTexture->GetHeight());
 
@@ -299,6 +299,7 @@ namespace Oksijen
 		mFence->Reset();
 
 	}
+
 	void ImGuiRenderer::InitializeInternalResources()
 	{
 		//Create imgui context

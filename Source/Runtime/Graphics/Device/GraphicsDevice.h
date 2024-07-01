@@ -82,7 +82,29 @@ namespace Oksijen
 		GraphicsQueue* RentQueue(const VkQueueFlags flags);
 		Swapchain* CreateSwapchain(const Surface* pSurface, GraphicsQueue* pQueue, const unsigned int bufferCount, const unsigned int width, const unsigned int height,const unsigned int arrayLevels, const VkPresentModeKHR presentMode, const VkFormat format, const VkColorSpaceKHR formatColorspace, const VkImageUsageFlags imageUsageFlags);
 		GraphicsMemory* AllocateMemory(const VkMemoryPropertyFlagBits flags,const unsigned long long size);
-		Texture* CreateTexture(GraphicsMemory* pMemory, const VkImageType type, const VkFormat format, const unsigned int width, const unsigned int height,const unsigned int depth, const unsigned char mipLevels, const unsigned char arrayLevels, const VkSampleCountFlagBits samples, const VkImageTiling tiling, const VkImageUsageFlags usageFlags, const VkSharingMode sharingMode, const VkImageLayout imageLayout);
+		Texture* CreateTexture(
+			GraphicsMemory* pMemory,
+			const VkImageType type,
+			const VkFormat format,
+			const unsigned int width, const unsigned int height,const unsigned int depth,
+			const unsigned char mipLevels, const unsigned char arrayLevels,
+			const VkSampleCountFlagBits samples,
+			const VkImageTiling tiling,
+			const VkImageUsageFlags usageFlags,
+			const VkSharingMode sharingMode,
+			const VkImageLayout imageLayout);
+		Texture* CreateTexture(
+			GraphicsMemory* pMemory,
+			const VkImageType type,
+			const VkFormat format,
+			const unsigned int width, const unsigned int height, const unsigned int depth,
+			const unsigned char mipLevels, const unsigned char arrayLevels,
+			const VkSampleCountFlagBits samples,
+			const VkImageTiling tiling,
+			const VkImageUsageFlags usageFlags,
+			const VkSharingMode sharingMode,
+			const VkImageLayout imageLayout,
+			const VkImageCreateFlags flags);
 		TextureView* CreateTextureView(const Texture* pTexture, const unsigned int mipIndex, const unsigned int arrayIndex, const VkImageViewType viewType, const VkFormat format, const VkComponentMapping mapping, const VkImageAspectFlags aspectMask);
 		Fence* CreateFence(bool bSignalled);
 		Semaphore* CreateSemaphore(bool bSignalled);

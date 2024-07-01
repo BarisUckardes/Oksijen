@@ -42,6 +42,11 @@ namespace Oksijen
 	{
 		return new Texture(this,pMemory,type,format,width,height,depth,mipLevels,arrayLevels,samples,tiling,usageFlags,sharingMode,imageLayout);
 	}
+	Texture* GraphicsDevice::CreateTexture(GraphicsMemory* pMemory, const VkImageType type, const VkFormat format, const unsigned int width, const unsigned int height, const unsigned int depth, const unsigned char mipLevels, const unsigned char arrayLevels, const VkSampleCountFlagBits samples, const VkImageTiling tiling, const VkImageUsageFlags usageFlags, const VkSharingMode sharingMode, const VkImageLayout imageLayout,const VkImageCreateFlags flags)
+	{
+		return new Texture(this, pMemory, type, format, width, height, depth, mipLevels, arrayLevels, samples, tiling, usageFlags, sharingMode, imageLayout,flags);
+	}
+
 	TextureView* GraphicsDevice::CreateTextureView(const Texture* pTexture, const unsigned int mipIndex, const unsigned int arrayIndex, const VkImageViewType viewType, const VkFormat format, const VkComponentMapping mapping, const VkImageAspectFlags aspectMask)
 	{
 		return new TextureView(this,pTexture,mipIndex,arrayIndex,viewType,format,mapping,aspectMask);

@@ -71,6 +71,18 @@ namespace Oksijen
 					}
 				}
 
+				//Get metallic
+				{
+					const unsigned int count = pMaterial->GetTextureCount(aiTextureType_METALNESS);
+					if (count != 0)
+					{
+						aiString textureName;
+						pMaterial->GetTexture(aiTextureType_METALNESS, 0, &textureName);
+
+						materialData.MetalnessTextureName = textureName.C_Str();
+					}
+				}
+
 			}
 		}
 

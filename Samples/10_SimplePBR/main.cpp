@@ -77,7 +77,7 @@ namespace Oksijen
 			layout(binding = 5,set = 0) uniform sampler sampler0;
 
 			const vec4 c_LightColor = vec4(0.8f,0.8f,0.8f,1.0f);
-			const float c_Metallic = 0.1f;
+			const float c_Metallic = 1.0f;
 			const float PI = 3.14159265359;
 			
 			vec3 FresnelSchlick(float cosTheta,vec3 f0)
@@ -111,8 +111,8 @@ namespace Oksijen
 			{
 				float ndotV = max(dot(n,v),0.0f);
 				float ndotL = max(dot(n,l),0.0f);
-				float ggx1 = GeometrySchlickGGX(ndotL,roughness);
-				float ggx2 = GeometrySchlickGGX(ndotV,roughness);
+				float ggx1 = GeometrySchlickGGX(ndotV,roughness);
+				float ggx2 = GeometrySchlickGGX(ndotL,roughness);
 
 				return ggx1*ggx2;
 			}
@@ -167,7 +167,7 @@ namespace Oksijen
 	void Run()
 	{
 		//Get monitor
-		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[1];
+		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[0];
 
 		//Create window
 		WindowDesc windowDesc = {};

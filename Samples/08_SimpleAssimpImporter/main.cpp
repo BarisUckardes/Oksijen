@@ -54,7 +54,7 @@ namespace Oksijen
 	void Run()
 	{
 		//Get monitor
-		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[1];
+		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[0];
 
 		//Create window
 		WindowDesc windowDesc = {};

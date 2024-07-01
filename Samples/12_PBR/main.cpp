@@ -15,6 +15,7 @@
 #include <glm/matrix.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <Runtime/Mesh/MeshLoader.h>
+#include <Runtime/ImGui/ImGuiRenderer.h>
 
 namespace Oksijen
 {
@@ -35,6 +36,29 @@ namespace Oksijen
 	{
 		float ViewPos[3];
 	};
+	struct PointLightProperties
+	{
+		glm::vec3 Pos;
+		float padding;
+		glm::vec4 Color;
+		float Power;
+		float padding2[3];
+	};
+	struct DirectionalLightProperties
+	{
+		glm::vec3 Direction;
+		float padding;
+		glm::vec4 Color;
+		float Power;
+		float padding2[3];
+	};
+	struct LightBuffer
+	{
+		PointLightProperties PointLights[5];
+		DirectionalLightProperties DirectionalLight;
+		int PointLightCount = 0;
+		float AmbientPower = 1.0f;
+	};
 	struct RenderableObject
 	{
 		glm::vec3 Position = {0,0,0};
@@ -51,9 +75,11 @@ namespace Oksijen
 		Texture* pColorTexture = nullptr;
 		Texture* pNormalTexture = nullptr;
 		Texture* pRoughnessTexture = nullptr;
+		Texture* pMetalnessTexture = nullptr;
 		TextureView* pColorTextureView = nullptr;
 		TextureView* pNormalTextureView = nullptr;
 		TextureView* pRoughnessTextureView = nullptr;
+		TextureView* pMetalnessTextureView = nullptr;
 		DescriptorSet* pDescriptorSet = nullptr;
 
 		std::vector<RenderableObject> Renderables;
@@ -131,6 +157,7 @@ namespace Oksijen
 			layout(binding = 0,set = 1) uniform texture2D albedoTexture;
 			layout(binding = 1,set = 1) uniform texture2D normalTexture;
 			layout(binding = 2,set = 1) uniform texture2D roughnessTexture;
+			layout(binding = 3,set = 1) uniform texture2D metalnessTexture;
 
 			layout(std140,binding = 0,set = 2) uniform FragmentCameraBuffer
 			{
@@ -138,100 +165,187 @@ namespace Oksijen
 			};
 			layout(binding = 1,set = 2) uniform sampler sampler0;
 
-			const vec4 c_LightColor = vec4(0.8f,0.8f,0.8f,1.0f);
-			const float c_Metallic = 0.1f;
+			struct PointLightData
+			{
+				vec3 Pos;
+				vec4 Color;
+				float Power;
+			};
+			struct DirectionalLightData
+			{
+				vec3 Dir;
+				vec4 Color;
+				float Power;
+			};
+
+			layout(std140,binding = 2,set = 2) uniform LightBuffer
+			{
+				PointLightData PointLights[5];
+				DirectionalLightData DirectionalLight;
+				uint PointLightCount;
+				float AmbientPower;
+			};
+			layout(binding = 3,set = 2) uniform textureCube environmentTexture;
+
 			const float PI = 3.14159265359;
 			
-			vec3 FresnelSchlick(float cosTheta,vec3 f0)
+			float ndfGGX(float cosLh, float roughness)
 			{
-				return f0 + (1.0f-f0) * pow(clamp(1.0f-cosTheta,0.0f,1.0f),5.0f);
-			}
-			float DistributionGGX(vec3 n,vec3 h,float roughness)
-			{
-				float a = roughness*roughness;
-				float a2 = a*a;
-				float ndotH = max(dot(n,h),0.0f);
-				float ndotH2 = ndotH*ndotH;
+				float alpha   = roughness * roughness;
+				float alphaSq = alpha * alpha;
 
-				float num = a2;
-				float denom = (ndotH2*(a2-1.0f) + 1.0f);
-				denom = PI*denom*denom;
+				float denom = (cosLh * cosLh) * (alphaSq - 1.0) + 1.0;
+				return alphaSq / (PI * denom * denom);
+			}
+
+			// Single term for separable Schlick-GGX below.
+			float gaSchlickG1(float cosTheta, float k)
+			{
+				return cosTheta / (cosTheta * (1.0 - k) + k);
+			}
+
+			// Schlick-GGX approximation of geometric attenuation function using Smith's method.
+			float gaSchlickGGX(float cosLi, float cosLo, float roughness)
+			{
+				float r = roughness + 1.0;
+				float k = (r * r) / 8.0; // Epic suggests using this roughness remapping for analytic lights.
+				return gaSchlickG1(cosLi, k) * gaSchlickG1(cosLo, k);
+			}
+
+			// Shlick's approximation of the Fresnel factor.
+			vec3 fresnelSchlick(vec3 F0, float cosTheta)
+			{
+				return F0 + (vec3(1.0) - F0) * pow(1.0 - cosTheta, 5.0);
+			}
 			
-				return num / denom;
-			}
-			float GeometrySchlickGGX(float ndotV,float roughness)
-			{
-				float r = (roughness + 1.0f);
-				float k = (r*r) / 8.0f;
-				
-				float num = ndotV;
-				float denom = ndotV * (1.0f-k) + k;
-
-				return num / denom;
-			}
-			float GeometrySmith(vec3 n,vec3 v,vec3 l,float roughness)
-			{
-				float ndotV = max(dot(n,v),0.0f);
-				float ndotL = max(dot(n,l),0.0f);
-				float ggx1 = GeometrySchlickGGX(ndotL,roughness);
-				float ggx2 = GeometrySchlickGGX(ndotV,roughness);
-
-				return ggx1*ggx2;
-			}
+			const vec3 Fdielectric = vec3(0.04);
+			const float Epsilon = 0.00001;
 			void main()
 			{
-				vec3 albedo = texture(sampler2D(albedoTexture,sampler0),f_Uv).rgb;
-				vec3 roughness = texture(sampler2D(roughnessTexture,sampler0),f_Uv).rgb;
-				float ao = 0.5f;
+				vec4 albedo = texture(sampler2D(albedoTexture,sampler0),f_Uv).rgba;
+				if(albedo.a < 0.1f)
+					discard;
+
+				float metalness = texture(sampler2D(metalnessTexture,sampler0),f_Uv).b;
+				float roughness = texture(sampler2D(roughnessTexture,sampler0),f_Uv).g;
 				
+				//Outgoing light dir
+				vec3 Lo = normalize(ViewPos-f_WorldPos);
+
+				//Get current fragment normal
 				vec3 n = texture(sampler2D(normalTexture,sampler0),f_Uv).rgb;
 				n = n*2.0f-1.0f;
 				n = normalize(f_TBN*n);
+
+				//Angle between surface normal and outgoin light direction
+				float cosLo = max(0.0f,dot(n,Lo));
+
+				//Specular reflection vector
+				vec3 Lr = 2.0f* cosLo*n-Lo;
+
+				//Fresnel reflectance
+				vec3 F0 = mix(Fdielectric, albedo.rgb, metalness);
+
+				//Direct light calculation
+				vec3 directLighting = vec3(0);
+				for(uint i = 0;i<PointLightCount;i++)
+				{
+					vec3 Li = -normalize(f_WorldPos-PointLights[i].Pos);
+					float Ldistance = length(f_WorldPos-PointLights[i].Pos);
+					float Lradiance = PointLights[i].Power * (1.0f/(Ldistance*Ldistance));
+					vec3 Lcolor = Lradiance * PointLights[i].Color.rgb;
+					
+					//Half vector between Li and Lo
+					vec3 Lh = normalize(Li + Lo);
+
+					//Calculate angles between surface normal and light vectors
+					float cosLi = max(0.0f,dot(n,Li));
+					float cosLh = max(0.0f,dot(n,Lh));
+
+					//Calculate fresnel
+					vec3 F = fresnelSchlick(F0,max(0.0f,dot(Lh,Lo)));
+
+					// Calculate normal distribution for specular BRDF.
+					float D = ndfGGX(cosLh, roughness);
+
+					// Calculate geometric attenuation for specular BRDF.
+					float G = gaSchlickGGX(cosLi, cosLo, roughness);
+
+					// Diffuse scattering happens due to light being refracted multiple times by a dielectric medium.
+					// Metals on the other hand either reflect or absorb energy, so diffuse contribution is always zero.
+					// To be energy conserving we must scale diffuse BRDF contribution based on Fresnel factor & metalness.
+					vec3 kd = mix(vec3(1.0) - F, vec3(0.0), metalness);
+
+					// Lambert diffuse BRDF.
+					// We don't scale by 1/PI for lighting & material units to be more convenient.
+					// See: https://seblagarde.wordpress.com/2012/01/08/pi-or-not-to-pi-in-game-lighting-equation/
+					vec3 diffuseBRDF = kd * albedo.rgb;
+
+					// Cook-Torrance specular microfacet BRDF.
+					vec3 specularBRDF = (F * D * G) / max(Epsilon, 4.0 * cosLi * cosLo);
+
+					// Total contribution for this light.
+					directLighting += (diffuseBRDF + specularBRDF) * Lcolor * cosLi;
+				}
+				{
+					vec3 Li = -normalize(DirectionalLight.Dir);
+					float Lradiance = DirectionalLight.Power * 1.0f;
+					vec3 Lcolor = Lradiance * DirectionalLight.Color.rgb;
+					
+					//Half vector between Li and Lo
+					vec3 Lh = normalize(Li + Lo);
+
+					//Calculate angles between surface normal and light vectors
+					float cosLi = max(0.0f,dot(n,Li));
+					float cosLh = max(0.0f,dot(n,Lh));
+
+					//Calculate fresnel
+					vec3 F = fresnelSchlick(F0,max(0.0f,dot(Lh,Lo)));
+
+					// Calculate normal distribution for specular BRDF.
+					float D = ndfGGX(cosLh, roughness);
+
+					// Calculate geometric attenuation for specular BRDF.
+					float G = gaSchlickGGX(cosLi, cosLo, roughness);
+
+					// Diffuse scattering happens due to light being refracted multiple times by a dielectric medium.
+					// Metals on the other hand either reflect or absorb energy, so diffuse contribution is always zero.
+					// To be energy conserving we must scale diffuse BRDF contribution based on Fresnel factor & metalness.
+					vec3 kd = mix(vec3(1.0) - F, vec3(0.0), metalness);
+
+					// Lambert diffuse BRDF.
+					// We don't scale by 1/PI for lighting & material units to be more convenient.
+					// See: https://seblagarde.wordpress.com/2012/01/08/pi-or-not-to-pi-in-game-lighting-equation/
+					vec3 diffuseBRDF = kd * albedo.rgb;
+
+					// Cook-Torrance specular microfacet BRDF.
+					vec3 specularBRDF = (F * D * G) / max(Epsilon, 4.0 * cosLi * cosLo);
+
+					// Total contribution for this light.
+					directLighting += (diffuseBRDF + specularBRDF) * Lcolor * cosLi;
+				}
+				//Ambient lighting
+				vec3 ambientLighting = vec3(0);
+				{
+					vec3 irradiance = texture(samplerCube(environmentTexture,sampler0),n).rgb;
+					irradiance = vec3(255 / 255.0f, 222 / 255.0f, 131 / 255.0f);
+					vec3 F = fresnelSchlick(F0,cosLo);
+
+					vec3 kd = mix(vec3(1.0f)-F,vec3(0.0f),metalness);
+
+					vec3 diffuseIBL = kd*albedo.rgb*irradiance;
 				
-				vec3 f0 = vec3(0.04f);
-				f0 = mix(f0,albedo,c_Metallic);
+					ambientLighting = diffuseIBL*AmbientPower;
+				}
 
-				vec3 lo = vec3(0.0f);
-				vec3 lightPos = vec3(0,0,0);
-				float lightPower = 0.05f;
-				vec3 v = normalize(ViewPos-f_WorldPos);
-				vec3 l = normalize(lightPos-f_WorldPos);
-				vec3 h = normalize(v + l);
-				float distance = length(lightPos-f_WorldPos);
-				float attenuation = 1.0f / (distance*distance);
-				vec3 radiance = (c_LightColor*attenuation*lightPower).rgb;
-
-				float ndf = DistributionGGX(n,h,roughness.g);
-				float g = GeometrySmith(n,v,l,roughness.g);
-				vec3 f = FresnelSchlick(max(dot(h,v),0.0f),f0);
-
-				vec3 ks = f;
-				vec3 kd = vec3(1.0f) - ks;
-				kd *= 1.0f-c_Metallic;
-	
-				vec3 numerator = ndf*g*f;
-				float denominator = 4.0f*max(dot(n,v),0.0f) * max(dot(n,l),0.0f) * 0.0001f;
-				vec3 specular = numerator / denominator;
-
-
-				float ndotl = max(dot(n,l),0.0f);
-				lo +=(kd*albedo/PI + specular)*radiance*ndotl;
-				
-				vec3 ambient = vec3(0.03f)*albedo*ao;
-				vec3 color = ambient + lo;
-				color = color / (color + vec3(1.0f));
-				color = pow(color,vec3(1.0f / 2.2f));
-			
-				ColorOut = vec4(color,1.0f);
-				ColorOut = vec4(albedo,1.0f)*dot(n,vec3(1,1,1));
-				ColorOut = vec4(albedo,1.0f);
-		}
+				ColorOut =  vec4(directLighting + ambientLighting,1.0f);
+			}
 )STR";
 
 	void Run()
 	{
 		//Get monitor
-		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[1];
+		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[0];
 
 		//Create window
 		WindowDesc windowDesc = {};
@@ -412,6 +526,17 @@ namespace Oksijen
 		std::vector<TextureLoadData> colorTextures;
 		std::vector<TextureLoadData> normalTextures;
 		std::vector<TextureLoadData> roughnessTextures;
+		std::vector<TextureLoadData> metalnessTextures;
+		TextureLoadData environmentTexture;
+
+		//Load environment texture
+		{
+			std::string path = RES_PATH;
+			path += "/EnvironmentTexture.hdr";
+			DEV_ASSERT(TextureLoader::LoadFromPath(path, 4, &environmentTexture.pData, environmentTexture.DataSize, environmentTexture.Width, environmentTexture.Height, environmentTexture.Channels), "Main", "Failed to load the environment texture");
+
+			applicationMemoryRequirement += environmentTexture.DataSize*6;
+		}
 
 		//Load sponza textures
 		for (const MaterialImportData& importedMaterial : sponzeMaterials)
@@ -473,10 +598,28 @@ namespace Oksijen
 				roughnessTextures.push_back({});
 			}
 
+			//Load metalness
+			if (importedMaterial.MetalnessTextureName != "")
+			{
+				TextureLoadData loadData = {};
+				std::string path = RES_PATH;
+				path += "/Sponza/";
+				path += importedMaterial.MetalnessTextureName;
+				DEV_ASSERT(TextureLoader::LoadFromPath(path, 4, &loadData.pData, loadData.DataSize, loadData.Width, loadData.Height, loadData.Channels), "Main", "Failed to load the metalness texture");
+
+				metalnessTextures.push_back(loadData);
+
+				applicationMemoryRequirement += loadData.DataSize;
+			}
+			else
+			{
+				metalnessTextures.push_back({});
+			}
+
 		}
 
 		applicationMemoryRequirement += pWindow->GetWidth() * pWindow->GetHeight() * 4; // Depth texture
-		applicationMemoryRequirement += sizeof(FragmentCameraBuffer); // 1 fragment camera buffer
+		applicationMemoryRequirement += sizeof(FragmentCameraBuffer) + sizeof(LightBuffer); // 1 fragment camera buffer
 		applicationMemoryRequirement += MB_TO_BYTE(10); // manual offset
 
 		//Allocate memory
@@ -484,20 +627,20 @@ namespace Oksijen
 		GraphicsMemory* pDeviceMemory = pDevice->AllocateMemory(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, applicationMemoryRequirement);
 
 		//Create static descriptor layout
-		const unsigned int staticSetLayoutBindings[] = { 0,1};
-		const VkDescriptorType staticSetLayoutDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLER };
-		const unsigned int staticSetLayoutDescriptorCounts[] = { 1,1};
-		const VkShaderStageFlags staticSetLayoutShaderStages[] = { VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
+		const unsigned int staticSetLayoutBindings[] = { 0,1,2,3};
+		const VkDescriptorType staticSetLayoutDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLER,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE };
+		const unsigned int staticSetLayoutDescriptorCounts[] = { 1,1,1,1};
+		const VkShaderStageFlags staticSetLayoutShaderStages[] = { VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
 
-		DescriptorSetLayout* pStaticSetLayout = pDevice->CreateDescriptorSetLayout(staticSetLayoutBindings, staticSetLayoutDescriptorTypes, staticSetLayoutDescriptorCounts, staticSetLayoutShaderStages, 2);
+		DescriptorSetLayout* pStaticSetLayout = pDevice->CreateDescriptorSetLayout(staticSetLayoutBindings, staticSetLayoutDescriptorTypes, staticSetLayoutDescriptorCounts, staticSetLayoutShaderStages, 4);
 
 		//Create per material descriptor layout
-		const unsigned int materialSetLayoutBindings[] = { 0,1,2 };
-		const VkDescriptorType materialSetLayoutDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE };
-		const unsigned int materialSetLayoutDescriptorCounts[] = { 1,1,1,};
-		const VkShaderStageFlags materialSetLayoutShaderStages[] = { VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
+		const unsigned int materialSetLayoutBindings[] = { 0,1,2,3 };
+		const VkDescriptorType materialSetLayoutDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE };
+		const unsigned int materialSetLayoutDescriptorCounts[] = { 1,1,1,1};
+		const VkShaderStageFlags materialSetLayoutShaderStages[] = { VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
 
-		DescriptorSetLayout* pMaterialSetLayout = pDevice->CreateDescriptorSetLayout(materialSetLayoutBindings, materialSetLayoutDescriptorTypes, materialSetLayoutDescriptorCounts, materialSetLayoutShaderStages, 3);
+		DescriptorSetLayout* pMaterialSetLayout = pDevice->CreateDescriptorSetLayout(materialSetLayoutBindings, materialSetLayoutDescriptorTypes, materialSetLayoutDescriptorCounts, materialSetLayoutShaderStages, 4);
 
 		//Create per renderable descriptor layout
 		const unsigned int renderableSetLayoutBindings[] = { 0 };
@@ -508,15 +651,20 @@ namespace Oksijen
 		DescriptorSetLayout* pRenderableSetLayout = pDevice->CreateDescriptorSetLayout(renderableSetLayoutBindings, renderableSetLayoutDescriptorTypes, renderableSetLayoutDescriptorCounts, renderableSetLayoutShaderStages, 1);
 
 		//Create descriptor pool
-		const unsigned int poolDescriptorCounts[] = { sponzaMeshes.size() + 1 ,sponzeMaterials.size()*3 ,1 };
+		const unsigned int poolDescriptorCounts[] = { sponzaMeshes.size() + 2 ,(sponzeMaterials.size()*4) + 2 ,2 };
 		const VkDescriptorType poolDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLER };
 		DescriptorPool* pDescriptorPool = pDevice->CreateDescriptorPool(VkDescriptorPoolCreateFlags(), sponzeMaterials.size() + sponzaMeshes.size() + 1, poolDescriptorTypes, poolDescriptorCounts, 3);
 
 		//Create default resources
 		Texture* pDefaultTexture = pDevice->CreateTexture(pDeviceMemory, VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, 1, 1, 1, 1, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT, VK_SHARING_MODE_EXCLUSIVE, VK_IMAGE_LAYOUT_UNDEFINED);
+		Texture* pEnvironmentTexture = pDevice->CreateTexture(pDeviceMemory, VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, environmentTexture.Width, environmentTexture.Height, 1, 1, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT);
 		Sampler* pDefaultSampler = pDevice->CreateSampler(VK_FILTER_LINEAR, VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, 0, false, 0, VK_FALSE, VK_COMPARE_OP_NEVER, 0, 0, VK_BORDER_COLOR_INT_OPAQUE_WHITE, VK_FALSE);
+
 		GraphicsBuffer* pCameraViewBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(FragmentCameraBuffer));
 		GraphicsBuffer* pCameraViewStageBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(FragmentCameraBuffer));
+
+		GraphicsBuffer* pLightBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(LightBuffer));
+		GraphicsBuffer* pLightStageBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(LightBuffer));
 
 		constexpr VkComponentMapping mapping =
 		{
@@ -526,6 +674,7 @@ namespace Oksijen
 			VK_COMPONENT_SWIZZLE_IDENTITY
 		};
 		TextureView* pDefaultTextureView = pDevice->CreateTextureView(pDefaultTexture, 0, 0, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, mapping, VK_IMAGE_ASPECT_COLOR_BIT);
+		TextureView* pEnvironmentTextureView = pDevice->CreateTextureView(pEnvironmentTexture, 0, 0, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_R8G8B8A8_UNORM, mapping, VK_IMAGE_ASPECT_COLOR_BIT);
 
 		//Create static descriptor set
 		DescriptorSet* pStaticDescriptorSet = pDevice->AllocateDescriptorSet(pDescriptorPool,pStaticSetLayout);
@@ -533,6 +682,8 @@ namespace Oksijen
 		//Update static descriptor set
 		pDevice->UpdateDescriptorSetBuffer(pStaticDescriptorSet, 0, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, pCameraViewBuffer, 0, pCameraViewBuffer->GetSize());
 		pDevice->UpdateDescriptorSetTextureSampler(pStaticDescriptorSet, 1, 0, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, pDefaultSampler, VK_IMAGE_LAYOUT_UNDEFINED);
+		pDevice->UpdateDescriptorSetBuffer(pStaticDescriptorSet, 2, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, pLightBuffer, 0, sizeof(LightBuffer));
+		pDevice->UpdateDescriptorSetTextureSampler(pStaticDescriptorSet, 3, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, pEnvironmentTextureView, nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 		//Load materials
 		std::vector<MaterialData> materials;
@@ -545,6 +696,7 @@ namespace Oksijen
 			const TextureLoadData& colorTextureLoadData = colorTextures[i];
 			const TextureLoadData& normalTextureLoadData = normalTextures[i];
 			const TextureLoadData& roughnessTextureLoadaData = roughnessTextures[i];
+			const TextureLoadData& metalnessTextureLoadData = metalnessTextures[i];
 
 			//Create new material
 			MaterialData material = {};
@@ -612,6 +764,28 @@ namespace Oksijen
 				material.pRoughnessTextureView = pDefaultTextureView;
 			}
 
+			//Create metalness texture
+			if (metalnessTextureLoadData.pData != nullptr)
+			{
+				material.pMetalnessTexture = pDevice->CreateTexture(pDeviceMemory, VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, metalnessTextureLoadData.Width, metalnessTextureLoadData.Height, 1, 1, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, VK_IMAGE_LAYOUT_UNDEFINED);
+				material.pMetalnessTextureView = pDevice->CreateTextureView(material.pMetalnessTexture, 0, 0, VK_IMAGE_VIEW_TYPE_2D, material.pMetalnessTexture->GetFormat(), mapping, VK_IMAGE_ASPECT_COLOR_BIT);
+
+				GraphicsBuffer* pStageBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, metalnessTextureLoadData.DataSize);
+
+				pDevice->UpdateHostBuffer(pStageBuffer, metalnessTextureLoadData.pData, metalnessTextureLoadData.DataSize, 0);
+
+				pCmdList->SetPipelineTextureBarrier(material.pMetalnessTexture, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VkDependencyFlags());
+				pCmdList->CopyBufferTexture(pStageBuffer, material.pMetalnessTexture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0, 0, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1, 0, 0, 0, material.pMetalnessTexture->GetWidth(), material.pMetalnessTexture->GetHeight(), 1);
+				pCmdList->SetPipelineTextureBarrier(material.pMetalnessTexture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VkDependencyFlags());
+
+				textureTempBuffers.push_back(pStageBuffer);
+			}
+			else
+			{
+				material.pMetalnessTexture = pDefaultTexture;
+				material.pMetalnessTextureView = pDefaultTextureView;
+			}
+
 			//Create descriptor set
 			material.pDescriptorSet = pDevice->AllocateDescriptorSet(pDescriptorPool, pMaterialSetLayout);
 
@@ -619,8 +793,17 @@ namespace Oksijen
 			pDevice->UpdateDescriptorSetTextureSampler(material.pDescriptorSet, 0, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, material.pColorTextureView, nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 			pDevice->UpdateDescriptorSetTextureSampler(material.pDescriptorSet, 1, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, material.pNormalTextureView, nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 			pDevice->UpdateDescriptorSetTextureSampler(material.pDescriptorSet, 2, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, material.pRoughnessTextureView, nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			pDevice->UpdateDescriptorSetTextureSampler(material.pDescriptorSet, 3, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, material.pMetalnessTextureView, nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 			materials.push_back(material);
+		}
+		GraphicsBuffer* pEnvironmentTextureStageBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, environmentTexture.DataSize);
+		{
+			pDevice->UpdateHostBuffer(pEnvironmentTextureStageBuffer, environmentTexture.pData, environmentTexture.DataSize, 0);
+
+			pCmdList->SetPipelineTextureBarrier(pEnvironmentTexture, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VkDependencyFlags());
+			pCmdList->CopyBufferTexture(pEnvironmentTextureStageBuffer, pEnvironmentTexture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0, 0, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1, 0, 0, 0, pEnvironmentTexture->GetWidth(), pEnvironmentTexture->GetHeight(), 1);
+			pCmdList->SetPipelineTextureBarrier(pEnvironmentTexture, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VkDependencyFlags());
 		}
 		pCmdList->End();
 		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
@@ -640,6 +823,11 @@ namespace Oksijen
 		{
 			data.Free();
 		}
+		for (TextureLoadData& data : metalnessTextures)
+		{
+			data.Free();
+		}
+		//delete pEnvironmentTextureStageBuffer;
 
 		//Load renderable objects
 		std::vector<RenderableObject> renderables;
@@ -911,9 +1099,25 @@ namespace Oksijen
 		//Create present image fence
 		Fence* pPresentImageAcquireFence = pDevice->CreateFence(false);
 
+		//Create imgui renderer
+		ImGuiRenderer* pGUIRenderer = new ImGuiRenderer(pDevice,pDefaultGraphicsQueue);
+
 		//Application loop
 		glm::vec3 cameraPosition = { 0,0,-3 };
 		glm::vec3 cameraForward = { 0,0,1 };
+		LightBuffer lightBuffer = {};
+		{
+			lightBuffer.PointLights[0].Pos = { 0,3,0 };
+			lightBuffer.PointLights[0].Color = { 100 / 255.0f, 149 / 255.0f, 237 / 255.0f,1.0f };
+			lightBuffer.PointLights[0].Power = 20.0f;
+
+			lightBuffer.DirectionalLight.Direction = { 0.0f,-1.0f,0.0f };
+			lightBuffer.DirectionalLight.Color = { 1.0f,1.0f,1.0f,1.0f };
+			lightBuffer.DirectionalLight.Power = 1.0f;
+
+			lightBuffer.PointLightCount = 1;
+		}
+
 		const glm::vec3 relativeUp = { 0,-1,0 };
 		bool bRed = true;
 		while (pWindow->IsActive())
@@ -924,6 +1128,9 @@ namespace Oksijen
 			{
 				break;
 			}
+
+			//Update imgui events
+			pGUIRenderer->UpdateEvents(pWindow->GetBufferedEvents());
 
 			//FIRST Acquire image index
 			const unsigned int swapchainImageIndex = pSwapchain->AcquireImageIndex(pPresentImageAcquireFence, nullptr);
@@ -1002,11 +1209,14 @@ namespace Oksijen
 					 break;
 				 }
 			}
+
+			pDevice->UpdateHostBuffer(pLightStageBuffer, (const unsigned char*)&lightBuffer, sizeof(LightBuffer), 0);
+
 			//Update camera stage buffer
 			pDevice->UpdateHostBuffer(pCameraViewStageBuffer, (const unsigned char*)&cameraPosition, sizeof(cameraPosition),0);
 
 			//Update renderable transform stage buffers
-			const glm::mat4x4 projection = glm::perspective(glm::radians(60.0f), pWindow->GetWidth() / (float)pWindow->GetHeight(), 0.001f, 100.0f);
+			const glm::mat4x4 projection = glm::perspective(glm::radians(60.0f), pWindow->GetWidth() / (float)pWindow->GetHeight(), 0.1f, 100.0f);
 			const glm::mat4x4 view = glm::lookAt(cameraPosition,cameraPosition + cameraForward, relativeUp);
 
 			for (const MaterialData& material : materials)
@@ -1028,6 +1238,9 @@ namespace Oksijen
 
 			//Begin cmd
 			pCmdList->Begin();
+
+			//Update light data
+			pCmdList->CopyBufferBuffer(pLightStageBuffer, pLightBuffer, 0, 0, sizeof(LightBuffer));
 
 			//Update transform buffers
 			for (const MaterialData& material : materials)
@@ -1130,6 +1343,66 @@ namespace Oksijen
 			pCmdList->End();
 
 			//Submit cmd list
+			pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+			pCmdFence->Wait();
+			pCmdFence->Reset();
+
+			//Draw GUI
+			pGUIRenderer->StartRendering(0.1f);
+			if (ImGui::Begin("ControlPanel"))
+			{
+				ImGui::SliderFloat("AmbientPower", &lightBuffer.AmbientPower,0.0f,10.0f);
+
+				if (ImGui::CollapsingHeader("Point Lights"))
+				{
+					for (unsigned int i = 0; i < 5; i++)
+					{
+						PointLightProperties& properties = lightBuffer.PointLights[i];
+
+						ImGui::PushID(i*5);
+						ImGui::SliderFloat3("Pos", &properties.Pos.x, -10.0f, 10.0f);
+						ImGui::PopID();
+						ImGui::PushID((i*5)+1);
+						ImGui::SliderFloat4("Color", &properties.Color.x, 0.0f, 1.0f);
+						ImGui::PopID();
+						ImGui::PushID((i*5)+2);
+						ImGui::SliderFloat("Power", &properties.Power, 0.0f, 10.0f);
+						ImGui::PopID();
+
+					}
+				}
+				ImGui::SliderInt("Point light count", &lightBuffer.PointLightCount, 0, 10);
+				if (ImGui::CollapsingHeader("Directional Light"))
+				{
+					DirectionalLightProperties& properties = lightBuffer.DirectionalLight;
+
+					ImGui::PushID((5 * 3));
+					ImGui::SliderFloat3("Direction", &properties.Direction.x, -10.0f, 10.0f);
+					ImGui::PopID();
+					ImGui::PushID(1 + (5 * 3));
+					ImGui::SliderFloat4("Color", &properties.Color.x, 0.0f, 1.0f);
+					ImGui::PopID();
+					ImGui::PushID(2 + (5 * 3));
+					ImGui::SliderFloat("Power", &properties.Power, 0.0f, 10.0f);
+					ImGui::PopID();
+				}
+				ImGui::End();
+			}
+			pGUIRenderer->EndRendering(ppSwapchainTextureViews[swapchainImageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,VK_QUEUE_GRAPHICS_BIT,VK_IMAGE_ASPECT_COLOR_BIT,VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VkDependencyFlags());
+
+			pCmdList->Begin();
+
+			//Draw GUI
+			pCmdList->SetPipelineTextureBarrier(
+				pSwapchain->GetTexture(swapchainImageIndex),
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VkDependencyFlags());
+
+			pCmdList->End();
 			pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
 			pCmdFence->Wait();
 			pCmdFence->Reset();

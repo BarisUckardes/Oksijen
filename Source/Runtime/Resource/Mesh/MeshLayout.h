@@ -4,8 +4,16 @@
 
 namespace Oksijen
 {
-	struct RUNTIME_API MeshLayout
+	class RUNTIME_API MeshLayout
 	{
-		std::vector<MeshVertexLayout> VertexLayouts;
+	public:
+		MeshLayout(const std::vector<MeshVertexLayout>& vertexLayouts);
+		~MeshLayout() = default;
+
+		FORCEINLINE const std::vector<MeshVertexLayout>& GetVertexLayouts() const noexcept { return mVertexLayouts; }
+		FORCEINLINE unsigned int GetSize() const noexcept { return mSize; }
+	private:
+		const std::vector<MeshVertexLayout> mVertexLayouts;
+		unsigned int mSize;
 	};
 }

@@ -62,6 +62,7 @@ namespace Oksijen
 		std::string BaseColorTextureName;
 		std::string NormalTextureName;
 		std::string RoughnessTextureName;
+		std::string MetalnessTextureName;
 	};
 
 	class RUNTIME_API MeshLoader final

@@ -21,6 +21,19 @@ namespace Oksijen
 			const VkImageUsageFlags usageFlags,
 			const VkSharingMode sharingMode,
 			const VkImageLayout imageLayout);
+		Texture(
+			const GraphicsDevice* pDevice,
+			GraphicsMemory* pMemory,
+			const VkImageType type,
+			const VkFormat format,
+			const unsigned int width, const unsigned int height, const unsigned int depth,
+			const unsigned char mipLevels, const unsigned char arrayLevels,
+			const VkSampleCountFlagBits samples,
+			const VkImageTiling tiling,
+			const VkImageUsageFlags usageFlags,
+			const VkSharingMode sharingMode,
+			const VkImageLayout imageLayout,
+			const VkImageCreateFlags flags);
 		Texture(const VkImage swapchainImage,const unsigned int width,const unsigned int height,const unsigned int arrayLevels);
 		~Texture();
 
