@@ -40,4 +40,5 @@ add_subdirectory("Samples/09_SimpleLighting")
 add_subdirectory("Samples/10_SimplePBR")
 add_subdirectory("Samples/11_SponzaImport")
 add_subdirectory("Samples/12_PBR")
+add_subdirectory("Samples/13_DirectionalShadows")
 # --------------------------------------------------

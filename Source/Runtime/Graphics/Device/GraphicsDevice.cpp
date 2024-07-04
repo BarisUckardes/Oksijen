@@ -197,6 +197,8 @@ namespace Oksijen
 		writeInfo.descriptorCount = 1;
 		writeInfo.descriptorType = type;
 		writeInfo.pBufferInfo = &bufferInfo;
+		writeInfo.pImageInfo = nullptr;
+		writeInfo.pTexelBufferView = nullptr;
 		writeInfo.pNext = nullptr;
 
 		vkUpdateDescriptorSets(mLogicalDevice, 1, &writeInfo, 0, nullptr);

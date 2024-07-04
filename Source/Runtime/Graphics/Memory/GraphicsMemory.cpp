@@ -85,6 +85,7 @@ namespace Oksijen
 	}
 	void GraphicsMemory::Free(const unsigned long long offset)
 	{
+		return;
 		//Find and free owned memory
 		unsigned long long currentOffset = 0;
 		for (unsigned int i = 0; i < mBlocks.size(); i++)
