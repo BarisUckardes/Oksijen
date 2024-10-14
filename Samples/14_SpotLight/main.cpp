@@ -17,6 +17,9 @@
 #include <Runtime/Resource/Mesh/MeshLoader.h>
 #include <Runtime/ImGui/ImGuiRenderer.h>
 #include <Runtime/Resource/Light/DirectionalLight.h>
+#include <Runtime/Resource/Light/SpotLight.h>
+#include <Runtime/Resource/Camera/Camera.h>
+#include <Runtime/Logger/Logger.h>
 
 namespace Oksijen
 {
@@ -59,9 +62,23 @@ namespace Oksijen
 		glm::mat4 View;
 		glm::mat4 Projection;
 	};
+	struct SpotLightProperties
+	{
+		glm::vec3 Pos;
+		float padding;
+		glm::vec3 Direction;
+		float padding2;
+		glm::vec4 Color;
+		float Power;
+		float Fov;
+		float padding4[2];
+		glm::mat4 View;
+		glm::mat4 Projection;
+	};
 	struct LightBuffer
 	{
 		DirectionalLightProperties DirectionalLight;
+		SpotLightProperties SpotLight;
 		float AmbientPower = 1.0f;
 	};
 	struct RenderableObject
@@ -206,6 +223,17 @@ namespace Oksijen
 				mat4 LightProjection;
 			};
 
+			struct SpotLightData
+			{
+				vec3 Pos;
+				vec3 Dir;
+				vec4 Color;
+				float Power;
+				float Fov;
+				mat4 LightView;
+				mat4 LightProjection;
+			};
+
 			layout(location = 0) in vec2 f_Uv;
 			layout(location = 1) in vec3 f_Normal;
 			layout(location = 2) in vec3 f_WorldPos;
@@ -225,10 +253,12 @@ namespace Oksijen
 			layout(std140,binding = 1,set = 3) uniform LightBuffer
 			{
 				DirectionalLightData DirectionalLight;
+				SpotLightData SpotLight;
 				float AmbientPower;
 			};
 			layout(binding = 2,set = 3) uniform sampler sampler0;
 			layout(binding = 3,set = 3) uniform texture2D directionalShadowMap;
+			layout(binding = 4,set = 3) uniform texture2D spotShadowMap;
 
 			const float PI = 3.14159265359;
 			
@@ -263,16 +293,18 @@ namespace Oksijen
 			
 			const vec3 Fdielectric = vec3(0.04);
 			const float Epsilon = 0.00001;
-			float CalculateShadow(vec3 worldPos,mat4 view,mat4 projection)
+			float LinearizeDepth(float depth)
+			{
+				float z = depth * 2.0 - 1.0; // Back to NDC 
+				return (2.0 * 0.1f * 100.0f) / (100.0f + 0.1f - z * (100.0f - 0.1f));
+			}
+			float CalculateShadow(vec3 worldPos,mat4 view,mat4 projection,texture2D shadowMap)
 			{
 				vec4 lightSpacePos = vec4(worldPos,1.0f)*transpose(projection*view);
-
 				vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
-				
-				projCoords = projCoords*0.5f + 0.5f;
+				projCoords = projCoords *0.5 + 0.5f;
 
-				float closestDepth = texture(sampler2D(directionalShadowMap,sampler0),projCoords.xy).r;
-				
+				float closestDepth = texture(sampler2D(shadowMap,sampler0),projCoords.xy).r;
 				float currentDepth = projCoords.z;
 
 				float shadow = currentDepth > closestDepth ? 1.0f: 0.0f;
@@ -307,6 +339,8 @@ namespace Oksijen
 
 				//Direct light calculation
 				vec3 directLighting = vec3(0);
+
+				//Directional light
 				{
 					vec3 Li = -normalize(DirectionalLight.Dir);
 					float Lradiance = DirectionalLight.Power * 1.0f;
@@ -344,6 +378,46 @@ namespace Oksijen
 					// Total contribution for this light.
 					directLighting += (diffuseBRDF + specularBRDF) * Lcolor * cosLi;
 				}
+				//Spot light
+				{
+					vec3 Li = -normalize(SpotLight.Dir);
+						float distance = length(f_WorldPos-SpotLight.Pos);
+						float Lradiance = SpotLight.Power * (1.0f / (distance*distance));
+						vec3 Lcolor = Lradiance * SpotLight.Color.rgb;
+					
+						//Half vector between Li and Lo
+						vec3 Lh = normalize(Li + Lo);
+
+						//Calculate angles between surface normal and light vectors
+						float cosLi = max(0.0f,dot(n,Li));
+						float cosLh = max(0.0f,dot(n,Lh));
+
+						//Calculate fresnel
+						vec3 F = fresnelSchlick(F0,max(0.0f,dot(Lh,Lo)));
+
+						// Calculate normal distribution for specular BRDF.
+						float D = ndfGGX(cosLh, roughness);
+
+						// Calculate geometric attenuation for specular BRDF.
+						float G = gaSchlickGGX(cosLi, cosLo, roughness);
+
+						// Diffuse scattering happens due to light being refracted multiple times by a dielectric medium.
+						// Metals on the other hand either reflect or absorb energy, so diffuse contribution is always zero.
+						// To be energy conserving we must scale diffuse BRDF contribution based on Fresnel factor & metalness.
+						vec3 kd = mix(vec3(1.0) - F, vec3(0.0), metalness);
+
+						// Lambert diffuse BRDF.
+						// We don't scale by 1/PI for lighting & material units to be more convenient.
+						// See: https://seblagarde.wordpress.com/2012/01/08/pi-or-not-to-pi-in-game-lighting-equation/
+						vec3 diffuseBRDF = kd * albedo.rgb;
+
+						// Cook-Torrance specular microfacet BRDF.
+						vec3 specularBRDF = (F * D * G) / max(Epsilon, 4.0 * cosLi * cosLo);
+
+						// Total contribution for this light.
+						directLighting += (diffuseBRDF + specularBRDF) * Lcolor * cosLi;
+					
+				}
 
 				//Ambient lighting
 				vec3 ambientLighting = vec3(0);
@@ -359,12 +433,13 @@ namespace Oksijen
 					ambientLighting = diffuseIBL*AmbientPower;
 				}
 			
-				float shadow = CalculateShadow(f_WorldPos,DirectionalLight.LightView,DirectionalLight.LightProjection);
-				ColorOut =  vec4(directLighting*(1.0f-shadow)+ambientLighting,1.0f);
+				float shadow = CalculateShadow(f_WorldPos,DirectionalLight.LightView,DirectionalLight.LightProjection,directionalShadowMap);
+				//float shadow = CalculateShadow(f_WorldPos,SpotLight.LightView,SpotLight.LightProjection,spotShadowMap);
+				ColorOut =  vec4(directLighting*(1.0f-shadow) + ambientLighting,1.0f);
 			}
 )STR";
 
-	void Run()
+	void Run(const char* pExePath)
 	{
 		//Get monitor
 		PlatformMonitor* pMonitor = PlatformMonitor::GetMonitors()[0];
@@ -655,6 +730,7 @@ namespace Oksijen
 
 		}
 
+
 		applicationMemoryRequirement += pWindow->GetWidth() * pWindow->GetHeight() * 4; // Depth texture
 		applicationMemoryRequirement += sizeof(FragmentCameraBuffer) + sizeof(LightBuffer); // 1 fragment camera buffer
 		applicationMemoryRequirement += MB_TO_BYTE(100); // manual offset
@@ -666,13 +742,16 @@ namespace Oksijen
 		//Create directional light
 		DirectionalLight* pDirectionalLight = new DirectionalLight(pDevice, pDeviceMemory, 4096, 4096,VK_FORMAT_D16_UNORM);
 
-		//Create static descriptor layout
-		const unsigned int staticSetLayoutBindings[] = { 0,1,2,3};
-		const VkDescriptorType staticSetLayoutDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLER,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE };
-		const unsigned int staticSetLayoutDescriptorCounts[] = { 1,1,1,1};
-		const VkShaderStageFlags staticSetLayoutShaderStages[] = { VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
+		//Create spot light
+		SpotLight* pSpotLight = new SpotLight(pDevice, pDeviceMemory, 4096, 4096, VK_FORMAT_D16_UNORM);
 
-		DescriptorSetLayout* pStaticSetLayout = pDevice->CreateDescriptorSetLayout(staticSetLayoutBindings, staticSetLayoutDescriptorTypes, staticSetLayoutDescriptorCounts, staticSetLayoutShaderStages, 4);
+		//Create static descriptor layout
+		const unsigned int staticSetLayoutBindings[] = { 0,1,2,3,4};
+		const VkDescriptorType staticSetLayoutDescriptorTypes[] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_SAMPLER,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE };
+		const unsigned int staticSetLayoutDescriptorCounts[] = { 1,1,1,1,1};
+		const VkShaderStageFlags staticSetLayoutShaderStages[] = { VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT,VK_SHADER_STAGE_FRAGMENT_BIT };
+
+		DescriptorSetLayout* pStaticSetLayout = pDevice->CreateDescriptorSetLayout(staticSetLayoutBindings, staticSetLayoutDescriptorTypes, staticSetLayoutDescriptorCounts, staticSetLayoutShaderStages, 5);
 
 		//Create per material descriptor layout
 		const unsigned int materialSetLayoutBindings[] = { 0,1,2,3 };
@@ -716,6 +795,9 @@ namespace Oksijen
 		GraphicsBuffer* pDirectionalLightBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(glm::mat4)*2);
 		GraphicsBuffer* pDirectionalLightStageBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(glm::mat4)*2);
 
+		GraphicsBuffer* pSpotLightBuffer = pDevice->CreateBuffer(pDeviceMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(glm::mat4) * 2);
+		GraphicsBuffer* pSpotLightStageBuffer = pDevice->CreateBuffer(pHostMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, sizeof(glm::mat4) * 2);
+
 		constexpr VkComponentMapping mapping =
 		{
 			VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -733,17 +815,29 @@ namespace Oksijen
 		pDevice->UpdateDescriptorSetBuffer(pStaticDescriptorSet, 1, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, pLightBuffer, 0, pLightBuffer->GetSize());
 		pDevice->UpdateDescriptorSetTextureSampler(pStaticDescriptorSet, 2, 0, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, pDefaultSampler, VK_IMAGE_LAYOUT_UNDEFINED);
 		pDevice->UpdateDescriptorSetTextureSampler(pStaticDescriptorSet, 3, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, pDirectionalLight->GetShadowTextureView(), nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		pDevice->UpdateDescriptorSetTextureSampler(pStaticDescriptorSet, 4, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, pSpotLight->GetShadowTextureView(), nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-		//Create light descriptor set
+		//Create directional light descriptor set
 		DescriptorSet* pDirectionalLightDescriptorSet = pDevice->AllocateDescriptorSet(pDescriptorPool,pRenderableSetLayout);
 
-		//Update light descriptor set
+		//Update directional light descriptor set
 		pDevice->UpdateDescriptorSetBuffer(pDirectionalLightDescriptorSet, 0, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, pDirectionalLightBuffer, 0, pDirectionalLightBuffer->GetSize());
 
-		//Create single texture descriptor set
+		//Create directional light single texture descriptor set
 		DescriptorSet* pDirectionalShadowTextureSet = pDevice->AllocateDescriptorSet(pDescriptorPool, pSingleTextureSetLayout);
 
 		pDevice->UpdateDescriptorSetTextureSampler(pDirectionalShadowTextureSet, 0, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, pDirectionalLight->GetShadowTextureView(), nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+		//Create spot light descriptor set
+		DescriptorSet* pSpotLightDescriptorSet = pDevice->AllocateDescriptorSet(pDescriptorPool, pRenderableSetLayout);
+
+		//Update spot light descriptor set
+		pDevice->UpdateDescriptorSetBuffer(pSpotLightDescriptorSet, 0, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, pSpotLightBuffer, 0, pSpotLightBuffer->GetSize());
+
+		//Create directional light single texture descriptor set
+		DescriptorSet* pSpotShadowTextureSet = pDevice->AllocateDescriptorSet(pDescriptorPool, pSingleTextureSetLayout);
+
+		pDevice->UpdateDescriptorSetTextureSampler(pSpotShadowTextureSet, 0, 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, pSpotLight->GetShadowTextureView(), nullptr, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 		//Load materials
 		std::vector<MaterialData> materials;
@@ -859,6 +953,7 @@ namespace Oksijen
 		}
 		{
 			pCmdList->SetPipelineTextureBarrier(pDirectionalLight->GetShadowTexture(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, VK_ACCESS_NONE, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VkDependencyFlags());
+			pCmdList->SetPipelineTextureBarrier(pSpotLight->GetShadowTexture(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, VK_ACCESS_NONE, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VkDependencyFlags());
 		}
 		pCmdList->End();
 		pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
@@ -1344,21 +1439,41 @@ namespace Oksijen
 		//Create imgui renderer
 		ImGuiRenderer* pGUIRenderer = new ImGuiRenderer(pDevice,pDefaultGraphicsQueue);
 
-		//Application loop
-		glm::vec3 cameraPosition = sceneCenter;
-		glm::vec3 cameraForward = { 0,0,1 };
-		glm::vec3 directionalLightPos = { 0,15.0f,0.0f };
+		//Create camera
+		Camera* pCamera = new Camera();
+		pCamera->SetPosition(sceneCenter);
+		pCamera->SetFarClip(100.0f);
+		pCamera->SetNearClip(0.1f);
+		pCamera->SetFieldOfView(60.0f);
 
+		//Create light buffer
 		LightBuffer lightBuffer = {};
 		{
 			lightBuffer.DirectionalLight.Direction = { 0.0f,-1.0f,0.0f };
 			lightBuffer.DirectionalLight.Color = { 1.0f,1.0f,1.0f,1.0f };
 			lightBuffer.DirectionalLight.Power = 1.0f;
 
+			lightBuffer.SpotLight.Pos = { -5.359,1.964,-2.705 };
+			lightBuffer.SpotLight.Direction = { 0.719,-0.484,-0.499 };
+			lightBuffer.SpotLight.Color = { 1.0f,0.0f,0.0f,1.0f };
+			lightBuffer.SpotLight.Power = 10.0f;
+			lightBuffer.SpotLight.Fov = 60.0f;
+
 			lightBuffer.AmbientPower = 0.253f;
 		}
 
+		//Create logger
+		const std::string exeName = "Spotlight.exe";
+		const std::string exePath = pExePath;
+		const std::string loggerPath = std::string(exePath.c_str(), exePath.size() - exeName.size()) + "LogFile.txt";
+		Logger* pLogger = new Logger(loggerPath);
+
+		//Application loop
 		bool bRed = true;
+		bool bMouseLocked = true;
+		bool bSpotFollowCamera = false;
+		glm::vec2 lastMousePos = glm::vec2(0, 0);
+		glm::vec2 mouseDelta = glm::vec2(0, 0);
 		while (pWindow->IsActive())
 		{
 			// poll window events
@@ -1371,13 +1486,10 @@ namespace Oksijen
 			//Update imgui events
 			pGUIRenderer->UpdateEvents(pWindow->GetBufferedEvents());
 
-			//FIRST Acquire image index
-			const unsigned int swapchainImageIndex = pSwapchain->AcquireImageIndex(pPresentImageAcquireFence, nullptr);
-			pPresentImageAcquireFence->Wait();
-			pPresentImageAcquireFence->Reset();
-
 			//Camera controls
 			const std::vector<WindowEventData>& windowEvents = pWindow->GetBufferedEvents();
+			
+			bool bExitRequested = false;
 			for (const WindowEventData& eventData : windowEvents)
 			{
 				 const WindowEventType type = eventData.Type;
@@ -1393,42 +1505,21 @@ namespace Oksijen
 					 break;
 				 case Oksijen::WindowEventType::KeyboardDown:
 				 {
-					 if (eventData.KeyboardKey == KeyboardKeys::Q)
-					 {
-						 glm::mat4x4 rotationMatrix(1);
-						 rotationMatrix = glm::rotate(rotationMatrix, glm::radians(-2.0f), glm::vec3(0, 1, 0));
-						 cameraForward = glm::vec3(rotationMatrix * glm::vec4(cameraForward, 1.0));
-					 }
-					 else if (eventData.KeyboardKey == KeyboardKeys::E)
-					 {
-						 glm::mat4x4 rotationMatrix(1);
-						 rotationMatrix = glm::rotate(rotationMatrix, glm::radians(2.0f), glm::vec3(0, 1, 0));
-						 cameraForward = glm::vec3(rotationMatrix * glm::vec4(cameraForward, 1.0));
-					 }
-
 					 if (eventData.KeyboardKey == KeyboardKeys::W)
 					 {
-						 cameraPosition += cameraForward;
+						 pCamera->Move(pCamera->GetForward());
 					 }
 					 else if (eventData.KeyboardKey == KeyboardKeys::S)
 					 {
-						 cameraPosition -= cameraForward;
-					 }
-					 if (eventData.KeyboardKey == KeyboardKeys::A)
-					 {
-						 cameraPosition -= glm::cross({0,1,0},cameraForward);
-					 }
-					 else if (eventData.KeyboardKey == KeyboardKeys::D)
-					 {
-						 cameraPosition += glm::cross({ 0,1,0 }, cameraForward);
+						 pCamera->Move(-pCamera->GetForward());
 					 }
 					 if (eventData.KeyboardKey == KeyboardKeys::Space)
 					 {
-						 cameraPosition += glm::vec3(0,1,0);
+						 bSpotFollowCamera = !bSpotFollowCamera;
 					 }
-					 else if (eventData.KeyboardKey == KeyboardKeys::LeftControl)
+					 if (eventData.KeyboardKey == KeyboardKeys::Escape)
 					 {
-						 cameraPosition -= glm::vec3(0, 1, 0);
+						 bExitRequested = true;
 					 }
 					 break;
 				 }
@@ -1437,11 +1528,38 @@ namespace Oksijen
 				 case Oksijen::WindowEventType::Char:
 					 break;
 				 case Oksijen::WindowEventType::MouseButtonDown:
+				 {
+					 if (eventData.MouseButton == MouseButtons::Right)
+					 {
+						 bMouseLocked = false;
+					 }
 					 break;
+				 }
 				 case Oksijen::WindowEventType::MouseButtonUp:
+				 {
+					 if (eventData.MouseButton == MouseButtons::Right)
+					 {
+						 bMouseLocked = true;
+					 }
 					 break;
+				 }
 				 case Oksijen::WindowEventType::MouseMoved:
+				 {
+					 if (lastMousePos == glm::vec2(0, 0))
+					 {
+						 lastMousePos = glm::vec2(eventData.MousePosX, eventData.MousePosY);
+						 mouseDelta = glm::vec2(0.0f, 0.0f);
+					 }
+					 else
+					 {
+						 const glm::vec2 mousePos = glm::vec2(eventData.MousePosX, eventData.MousePosY);;
+						 const glm::vec2 delta = mousePos - lastMousePos;
+
+						 mouseDelta = delta;
+						 lastMousePos = mousePos;
+					 }
 					 break;
+				 }
 				 case Oksijen::WindowEventType::MouseScrolled:
 					 break;
 				 default:
@@ -1449,310 +1567,491 @@ namespace Oksijen
 				 }
 			}
 
-			//Calculate directional shadow matrices
+			if (bExitRequested)
 			{
-				const glm::vec3 pos = cameraPosition;
-				const glm::vec3 dir = lightBuffer.DirectionalLight.Direction;
-				const glm::vec3 up =  glm::cross(dir, glm::vec3(1, 0, 0));
-				const glm::vec3 lookPosition = pos - dir;
-
-				const glm::mat4 projection = glm::ortho(-50.0f,50.0f,-50.0f,50.0f,-50.0f,50.0f);
-				const glm::mat4 view =
-					glm::lookAt(
-							pos,lookPosition, up
-					);
-
-				const glm::mat4 buffer[] = { view,projection };
-				pDevice->UpdateHostBuffer(pDirectionalLightStageBuffer, (const unsigned char*)&buffer, sizeof(buffer), 0);
-
-				lightBuffer.DirectionalLight.View = view;
-				lightBuffer.DirectionalLight.Projection = projection;
+				break;
 			}
 
-			//Update material models
-			for (const MaterialData& material : materials)
+			pLogger->AddEvent("FrameStart");
+
+			//FIRST Acquire image index
+			pLogger->AddEvent("ImageAcquireBegin");
+			const unsigned int swapchainImageIndex = pSwapchain->AcquireImageIndex(pPresentImageAcquireFence, nullptr);
+			pPresentImageAcquireFence->Wait();
+			pPresentImageAcquireFence->Reset();
+			pLogger->AddEvent("ImageAcquireEnd");
+
+			pLogger->AddEvent("RenderingBegin");
+			//Update camera aspect
+			if (!bMouseLocked)
 			{
-				for (const RenderableObject& renderable : material.Renderables)
+				pCamera->Rotate(glm::vec3(mouseDelta.y / pWindow->GetHeight(), mouseDelta.x / pWindow->GetWidth(), 0.0f) * 90.0f);
+			}
+			pCamera->SetAspectRatio(pWindow->GetWidth() / (float)pWindow->GetHeight());
+			if (bSpotFollowCamera)
+			{
+				lightBuffer.SpotLight.Pos = pCamera->GetPosition();
+				lightBuffer.SpotLight.Direction = pCamera->GetForward();
+			}
+
+			// Directional shadow pass
+			{
+				//Calculate directional shadow matrices
 				{
-					glm::mat4x4 model(1);
-					model = glm::translate(model, renderable.Position);
-					model = glm::scale(model, renderable.Scale);
-					model = glm::rotate(model, glm::radians(renderable.Rotation.x), { 1,0,0 });
-					model = glm::rotate(model, glm::radians(renderable.Rotation.y), { 0,1,0 });
-					model = glm::rotate(model, glm::radians(renderable.Rotation.z), { 0,0,1 });
-					pDevice->UpdateHostBuffer(renderable.pModelStageBuffer, (const unsigned char*)&model, sizeof(model), 0);
+					const glm::vec3 pos = pCamera->GetPosition();
+					const glm::vec3 dir = lightBuffer.DirectionalLight.Direction;
+					const glm::vec3 up = glm::cross(dir, glm::vec3(1, 0, 0));
+					const glm::vec3 lookPosition = pos - dir;
+
+					const glm::mat4 projection = glm::ortho(-50.0f, 50.0f, -50.0f, 50.0f, -50.0f, 50.0f);
+					const glm::mat4 view =
+						glm::lookAt(
+							pos, lookPosition, up
+						);
+
+					const glm::mat4 buffer[] = { view,projection };
+					pDevice->UpdateHostBuffer(pDirectionalLightStageBuffer, (const unsigned char*)&buffer, sizeof(buffer), 0);
+
+					lightBuffer.DirectionalLight.View = view;
+					lightBuffer.DirectionalLight.Projection = projection;
 				}
-			}
 
-			pCmdList->Begin();
-
-			//Update directional light buffer
-			pCmdList->CopyBufferBuffer(pDirectionalLightStageBuffer, pDirectionalLightBuffer, 0, 0, sizeof(glm::mat4)*2);
-
-			//Update model buffers
-			for (const MaterialData& material : materials)
-			{
-				for (const RenderableObject& renderable : material.Renderables)
+				//Update material models
+				for (const MaterialData& material : materials)
 				{
-					pCmdList->CopyBufferBuffer(renderable.pModelStageBuffer, renderable.pModelBuffer, 0, 0, renderable.pModelBuffer->GetSize());
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						glm::mat4x4 model(1);
+						model = glm::translate(model, renderable.Position);
+						model = glm::scale(model, renderable.Scale);
+						model = glm::rotate(model, glm::radians(renderable.Rotation.x), { 1,0,0 });
+						model = glm::rotate(model, glm::radians(renderable.Rotation.y), { 0,1,0 });
+						model = glm::rotate(model, glm::radians(renderable.Rotation.z), { 0,0,1 });
+						pDevice->UpdateHostBuffer(renderable.pModelStageBuffer, (const unsigned char*)&model, sizeof(model), 0);
+					}
 				}
+
+				pCmdList->Begin();
+
+				//Update directional light buffer
+				pCmdList->CopyBufferBuffer(pDirectionalLightStageBuffer, pDirectionalLightBuffer, 0, 0, sizeof(glm::mat4) * 2);
+
+				//Update model buffers
+				for (const MaterialData& material : materials)
+				{
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						pCmdList->CopyBufferBuffer(renderable.pModelStageBuffer, renderable.pModelBuffer, 0, 0, renderable.pModelBuffer->GetSize());
+					}
+				}
+
+				//Set depth texture barrier
+				pCmdList->SetPipelineTextureBarrier(
+					pDirectionalLight->GetShadowTexture(),
+					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+					VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+					VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0,
+					VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+					VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+					VkDependencyFlags());
+
+				//Set shadow depth map
+				{
+					VkClearValue depthClearValue = {};
+					depthClearValue.depthStencil.depth = 1.0f;
+					pCmdList->SetDynamicRenderingDepthAttachment(pDirectionalLight->GetShadowTextureView(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, depthClearValue);
+
+					//Start dynamic rendering
+					pCmdList->BeginDynamicRendering(0, 1, 0, 0, pDirectionalLight->GetWidth(), pDirectionalLight->GetHeight());
+				}
+
+				//Set pipeline
+				pCmdList->SetPipeline(pShadowPipeline);
+
+				//Set descriptor sets
+				pCmdList->SetDescriptorSets((const DescriptorSet**)&pDirectionalLightDescriptorSet, 1, 0, nullptr, 0);
+
+				//Render renderables
+				for (const MaterialData& material : materials)
+				{
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						//Set renderable descriptor set
+						pCmdList->SetDescriptorSets((const DescriptorSet**)&renderable.pModelDescriptorSet, 1, 1, nullptr, 0);
+
+						//Set vertex index buffers
+						const unsigned long long offset = 0;
+						pCmdList->SetVertexBuffers((const GraphicsBuffer**)&renderable.pVertexBuffer, 1, 0, &offset);
+						pCmdList->SetIndexBuffer(renderable.pIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+						//Draw
+						pCmdList->DrawIndexed(renderable.pIndexBuffer->GetSize() / sizeof(unsigned int), 1, 0, 0, 0);
+					}
+				}
+
+				////End rendering
+				pCmdList->EndDynamicRendering();
+
+				pCmdList->End();
+				pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+				pCmdFence->Wait();
+				pCmdFence->Reset();
 			}
 
-			//Set depth texture barrier
-			pCmdList->SetPipelineTextureBarrier(
-				pDirectionalLight->GetShadowTexture(),
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
-				VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0,
-				VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-				VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				VkDependencyFlags());
+			//Spot light shadow pass
+			{
+				//Calculate spot shadow matrices
+				{
+					const glm::vec3 up = glm::vec3(0,-1,0);
+					const glm::vec3 pos = lightBuffer.SpotLight.Pos;
+					const glm::vec3 dir = lightBuffer.SpotLight.Direction;
+					const glm::mat4x4 projection = glm::perspective(glm::radians(lightBuffer.SpotLight.Fov), 1.0f, 0.1f, 100.0f);
+					const glm::mat4x4 view = glm::lookAt(pos, pos + dir, up);
+
+					const glm::mat4 buffer[] = { view,projection };
+					pDevice->UpdateHostBuffer(pSpotLightStageBuffer, (const unsigned char*)&buffer, sizeof(buffer), 0);
+
+					lightBuffer.SpotLight.View = view;
+					lightBuffer.SpotLight.Projection = projection;
+				}
+
+				//Update material models
+				for (const MaterialData& material : materials)
+				{
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						glm::mat4x4 model(1);
+						model = glm::translate(model, renderable.Position);
+						model = glm::scale(model, renderable.Scale);
+						model = glm::rotate(model, glm::radians(renderable.Rotation.x), { 1,0,0 });
+						model = glm::rotate(model, glm::radians(renderable.Rotation.y), { 0,1,0 });
+						model = glm::rotate(model, glm::radians(renderable.Rotation.z), { 0,0,1 });
+						pDevice->UpdateHostBuffer(renderable.pModelStageBuffer, (const unsigned char*)&model, sizeof(model), 0);
+					}
+				}
+
+				pCmdList->Begin();
+
+				//Update directional light buffer
+				pCmdList->CopyBufferBuffer(pSpotLightStageBuffer, pSpotLightBuffer, 0, 0, sizeof(glm::mat4) * 2);
+
+				//Update model buffers
+				for (const MaterialData& material : materials)
+				{
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						pCmdList->CopyBufferBuffer(renderable.pModelStageBuffer, renderable.pModelBuffer, 0, 0, renderable.pModelBuffer->GetSize());
+					}
+				}
+
+				//Set depth texture barrier
+				pCmdList->SetPipelineTextureBarrier(
+					pSpotLight->GetShadowTexture(),
+					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+					VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+					VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0,
+					VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+					VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+					VkDependencyFlags());
+
+				//Set shadow depth map
+				{
+					VkClearValue depthClearValue = {};
+					depthClearValue.depthStencil.depth = 1.0f;
+					pCmdList->SetDynamicRenderingDepthAttachment(pSpotLight->GetShadowTextureView(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, depthClearValue);
+
+					//Start dynamic rendering
+					pCmdList->BeginDynamicRendering(0, 1, 0, 0, pSpotLight->GetWidth(), pSpotLight->GetHeight());
+				}
+
+				//Set pipeline
+				pCmdList->SetPipeline(pShadowPipeline);
+
+				//Set descriptor sets
+				pCmdList->SetDescriptorSets((const DescriptorSet**)&pSpotLightDescriptorSet, 1, 0, nullptr, 0);
+
+				//Render renderables
+				for (const MaterialData& material : materials)
+				{
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						//Set renderable descriptor set
+						pCmdList->SetDescriptorSets((const DescriptorSet**)&renderable.pModelDescriptorSet, 1, 1, nullptr, 0);
+
+						//Set vertex index buffers
+						const unsigned long long offset = 0;
+						pCmdList->SetVertexBuffers((const GraphicsBuffer**)&renderable.pVertexBuffer, 1, 0, &offset);
+						pCmdList->SetIndexBuffer(renderable.pIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+						//Draw
+						pCmdList->DrawIndexed(renderable.pIndexBuffer->GetSize() / sizeof(unsigned int), 1, 0, 0, 0);
+					}
+				}
+
+				//End rendering
+				pCmdList->EndDynamicRendering();
+
+				pCmdList->End();
+				pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+				pCmdFence->Wait();
+				pCmdFence->Reset();
+			}
 			
-			//Set shadow depth map
+			// Render pass
 			{
+
+				//Update light host buffer
+				pDevice->UpdateHostBuffer(pLightStageBuffer, (const unsigned char*)&lightBuffer, sizeof(LightBuffer), 0);
+
+				//Update camera host buffer
+				const glm::vec3 cameraPosition = pCamera->GetPosition();
+				pDevice->UpdateHostBuffer(pCameraStageBuffer, (const unsigned char*)&cameraPosition, sizeof(cameraPosition), 0);
+
+				//Update renderable transform stage buffers
+				const glm::vec3 cameraForward = pCamera->GetForward();
+				const glm::vec3 up = -glm::cross(cameraForward, glm::vec3(1, 0, 0));
+				const glm::mat4x4 projection = pCamera->GetProjectionMatrix();
+				//const glm::mat4x4 view = glm::lookAt(cameraPosition, cameraPosition + cameraForward, up);
+				const glm::mat4 view = pCamera->GetViewMatrix();
+
+				for (const MaterialData& material : materials)
+				{
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						glm::mat4x4 model(1);
+						model = glm::translate(model, renderable.Position);
+						model = glm::scale(model, renderable.Scale);
+						model = glm::rotate(model, glm::radians(renderable.Rotation.x), { 1,0,0 });
+						model = glm::rotate(model, glm::radians(renderable.Rotation.y), { 0,1,0 });
+						model = glm::rotate(model, glm::radians(renderable.Rotation.z), { 0,0,1 });
+
+						MeshViewProjectionBuffer viewProjectionBuffer = { view,projection };
+
+						pDevice->UpdateHostBuffer(renderable.pViewProjectionStageBuffer, (const unsigned char*)&viewProjectionBuffer, sizeof(MeshViewProjectionBuffer), 0);
+						pDevice->UpdateHostBuffer(renderable.pModelStageBuffer, (const unsigned char*)&model, sizeof(model), 0);
+					}
+				}
+
+				//Begin cmd
+				pCmdList->Begin();
+
+				//Update light buffer
+				pCmdList->CopyBufferBuffer(pLightStageBuffer, pLightBuffer, 0, 0, sizeof(LightBuffer));
+
+				//Update camera buffer
+				pCmdList->CopyBufferBuffer(pCameraStageBuffer, pCameraBuffer, 0, 0, sizeof(FragmentCameraBuffer));
+
+				//Update transform buffers
+				for (const MaterialData& material : materials)
+				{
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						pCmdList->CopyBufferBuffer(renderable.pViewProjectionStageBuffer, renderable.pViewProjectionBuffer, 0, 0, renderable.pViewProjectionBuffer->GetSize());
+						pCmdList->CopyBufferBuffer(renderable.pModelStageBuffer, renderable.pModelBuffer, 0, 0, renderable.pModelBuffer->GetSize());
+					}
+				}
+
+				//Color attachment barriers
+				pCmdList->SetPipelineTextureBarrier(
+					pSwapchain->GetTexture(swapchainImageIndex),
+					VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+					VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+					VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+					VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+					VkDependencyFlags());
+
+				//Depth attachment barriers
+				pCmdList->SetPipelineTextureBarrier(
+					pDirectionalLight->GetShadowTexture(),
+					VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+					VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0,
+					VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+					VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+					VkDependencyFlags());
+
+				pCmdList->SetPipelineTextureBarrier(
+					pSpotLight->GetShadowTexture(),
+					VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+					VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0,
+					VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+					VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+					VkDependencyFlags());
+
+				//Set dynamic rendering color attachment
+				VkClearColorValue colorAttachmentClearValue = {};
+				if (bRed)
+				{
+					colorAttachmentClearValue.float32[0] = 1.0f;
+					colorAttachmentClearValue.float32[1] = 0.0f;
+					colorAttachmentClearValue.float32[2] = 0.0f;
+					colorAttachmentClearValue.float32[3] = 1.0f;
+				}
+				else
+				{
+					colorAttachmentClearValue.float32[0] = 0.0f;
+					colorAttachmentClearValue.float32[1] = 0.0f;
+					colorAttachmentClearValue.float32[2] = 1.0f;
+					colorAttachmentClearValue.float32[3] = 1.0f;
+				}
+
+				pCmdList->AddDynamicRenderingColorAttachment(
+					ppSwapchainTextureViews[swapchainImageIndex],
+					VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					VkResolveModeFlags(),
+					nullptr,
+					VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					VK_ATTACHMENT_LOAD_OP_CLEAR,
+					VK_ATTACHMENT_STORE_OP_STORE,
+					colorAttachmentClearValue);
+
 				VkClearValue depthClearValue = {};
 				depthClearValue.depthStencil.depth = 1.0f;
-				pCmdList->SetDynamicRenderingDepthAttachment(pDirectionalLight->GetShadowTextureView(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, depthClearValue);
+				pCmdList->SetDynamicRenderingDepthAttachment(pDepthTextureView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, depthClearValue);
 
 				//Start dynamic rendering
-				pCmdList->BeginDynamicRendering(0, 1, 0, 0, pDirectionalLight->GetWidth(), pDirectionalLight->GetHeight());
-			}
+				pCmdList->BeginDynamicRendering(0, 1, 0, 0, pWindow->GetWidth(), pWindow->GetHeight());
 
-			//Set pipeline
-			pCmdList->SetPipeline(pShadowPipeline);
+				//Set pipeline
+				pCmdList->SetPipeline(pPbrPipeline);
 
-			//Set descriptor sets
-			pCmdList->SetDescriptorSets((const DescriptorSet**)&pDirectionalLightDescriptorSet, 1, 0, nullptr, 0);
+				//Set static descriptor set
+				pCmdList->SetDescriptorSets((const DescriptorSet**)&pStaticDescriptorSet, 1, 3, nullptr, 0);
 
-			//Render renderables
-			for (const MaterialData& material : materials)
-			{
-				for (const RenderableObject& renderable : material.Renderables)
+				//Render renderables
+				for (const MaterialData& material : materials)
 				{
-					//Set renderable descriptor set
-					pCmdList->SetDescriptorSets((const DescriptorSet**)&renderable.pModelDescriptorSet, 1, 1, nullptr, 0);
+					//Set material descriptor set
+					pCmdList->SetDescriptorSets((const DescriptorSet**)&material.pDescriptorSet, 1, 2, nullptr, 0);
 
-					//Set vertex index buffers
-					const unsigned long long offset = 0;
-					pCmdList->SetVertexBuffers((const GraphicsBuffer**)&renderable.pVertexBuffer, 1, 0, &offset);
-					pCmdList->SetIndexBuffer(renderable.pIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+					for (const RenderableObject& renderable : material.Renderables)
+					{
+						//Set renderable descriptor set
+						pCmdList->SetDescriptorSets((const DescriptorSet**)&renderable.pViewportProjectionDescriptorSet, 1, 0, nullptr, 0);
+						pCmdList->SetDescriptorSets((const DescriptorSet**)&renderable.pModelDescriptorSet, 1, 1, nullptr, 0);
 
-					//Draw
-					pCmdList->DrawIndexed(renderable.pIndexBuffer->GetSize() / sizeof(unsigned int), 1, 0, 0, 0);
+						//Set vertex index buffers
+						const unsigned long long offset = 0;
+						pCmdList->SetVertexBuffers((const GraphicsBuffer**)&renderable.pVertexBuffer, 1, 0, &offset);
+						pCmdList->SetIndexBuffer(renderable.pIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+						//Draw
+						pCmdList->DrawIndexed(renderable.pIndexBuffer->GetSize() / sizeof(unsigned int), 1, 0, 0, 0);
+					}
 				}
+
+				//End dynamic rendering
+				pCmdList->EndDynamicRendering();
+
+				//Post barrier for presenting
+				pCmdList->SetPipelineTextureBarrier(
+					pSwapchain->GetTexture(swapchainImageIndex),
+					VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+					VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+					VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+					VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+					VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+					VkDependencyFlags());
+
+				//End cmd
+				pCmdList->End();
+
+				//Submit cmd list
+				pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+				pCmdFence->Wait();
+				pCmdFence->Reset();
 			}
-
-			//End rendering
-			pCmdList->EndDynamicRendering();
-
-			pCmdList->End();
-			pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
-			pCmdFence->Wait();
-			pCmdFence->Reset();
-			
-			//Update light host buffer
-			pDevice->UpdateHostBuffer(pLightStageBuffer, (const unsigned char*)&lightBuffer, sizeof(LightBuffer), 0);
-
-			//Update camera host buffer
-			pDevice->UpdateHostBuffer(pCameraStageBuffer, (const unsigned char*)&cameraPosition, sizeof(cameraPosition),0);
-
-			//Update renderable transform stage buffers
-			const glm::vec3 relativeUp = { 0,1,0 };
-			const glm::mat4x4 projection = glm::perspective(glm::radians(60.0f), pWindow->GetWidth() / (float)pWindow->GetHeight(), 0.1f, 100.0f);
-			const glm::mat4x4 view = glm::lookAt(cameraPosition,cameraPosition + cameraForward, -relativeUp);
-
-			for (const MaterialData& material : materials)
-			{
-				for (const RenderableObject& renderable : material.Renderables)
-				{
-					glm::mat4x4 model(1);
-					model = glm::translate(model, renderable.Position);
-					model = glm::scale(model, renderable.Scale);
-					model = glm::rotate(model, glm::radians(renderable.Rotation.x), { 1,0,0 });
-					model = glm::rotate(model, glm::radians(renderable.Rotation.y), { 0,1,0 });
-					model = glm::rotate(model, glm::radians(renderable.Rotation.z), { 0,0,1 });
-
-					MeshViewProjectionBuffer viewProjectionBuffer = { view,projection };
-
-					pDevice->UpdateHostBuffer(renderable.pViewProjectionStageBuffer, (const unsigned char*)&viewProjectionBuffer, sizeof(MeshViewProjectionBuffer), 0);
-					pDevice->UpdateHostBuffer(renderable.pModelStageBuffer, (const unsigned char*)&model, sizeof(model),0);
-				}
-			}
-
-			//Begin cmd
-			pCmdList->Begin();
-
-			//Update light buffer
-			pCmdList->CopyBufferBuffer(pLightStageBuffer, pLightBuffer, 0, 0, sizeof(LightBuffer));
-
-			//Update camera buffer
-			pCmdList->CopyBufferBuffer(pCameraStageBuffer, pCameraBuffer, 0, 0, sizeof(FragmentCameraBuffer));
-
-			//Update transform buffers
-			for (const MaterialData& material : materials)
-			{
-				for (const RenderableObject& renderable : material.Renderables)
-				{
-					pCmdList->CopyBufferBuffer(renderable.pViewProjectionStageBuffer, renderable.pViewProjectionBuffer, 0, 0, renderable.pViewProjectionBuffer->GetSize());
-					pCmdList->CopyBufferBuffer(renderable.pModelStageBuffer, renderable.pModelBuffer, 0, 0, renderable.pModelBuffer->GetSize());
-				}
-			}
-
-			//Color attachment barriers
-			pCmdList->SetPipelineTextureBarrier(
-				pSwapchain->GetTexture(swapchainImageIndex),
-				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
-				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
-				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VkDependencyFlags());
-
-			//Depth attachment barriers
-			pCmdList->SetPipelineTextureBarrier(
-				pDirectionalLight->GetShadowTexture(),
-				VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
-				VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0,
-				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-				VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				VkDependencyFlags());
-
-			//Set dynamic rendering color attachment
-			VkClearColorValue colorAttachmentClearValue = {};
-			if (bRed)
-			{
-				colorAttachmentClearValue.float32[0] = 1.0f;
-				colorAttachmentClearValue.float32[1] = 0.0f;
-				colorAttachmentClearValue.float32[2] = 0.0f;
-				colorAttachmentClearValue.float32[3] = 1.0f;
-			}
-			else
-			{
-				colorAttachmentClearValue.float32[0] = 0.0f;
-				colorAttachmentClearValue.float32[1] = 0.0f;
-				colorAttachmentClearValue.float32[2] = 1.0f;
-				colorAttachmentClearValue.float32[3] = 1.0f;
-			}
-
-			pCmdList->AddDynamicRenderingColorAttachment(
-				ppSwapchainTextureViews[swapchainImageIndex],
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VkResolveModeFlags(),
-				nullptr,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_ATTACHMENT_LOAD_OP_CLEAR,
-				VK_ATTACHMENT_STORE_OP_STORE,
-				colorAttachmentClearValue);
-
-			VkClearValue depthClearValue = {};
-			depthClearValue.depthStencil.depth = 1.0f;
-			pCmdList->SetDynamicRenderingDepthAttachment(pDepthTextureView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VkResolveModeFlags(), nullptr, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, depthClearValue);
-
-			//Start dynamic rendering
-			pCmdList->BeginDynamicRendering(0, 1, 0, 0, pWindow->GetWidth(), pWindow->GetHeight());
-
-			//Set pipeline
-			pCmdList->SetPipeline(pPbrPipeline);
-
-			//Set static descriptor set
-			pCmdList->SetDescriptorSets((const DescriptorSet**)&pStaticDescriptorSet, 1, 3, nullptr, 0);
-
-			//Render renderables
-			for (const MaterialData& material : materials)
-			{
-				//Set material descriptor set
-				pCmdList->SetDescriptorSets((const DescriptorSet**)&material.pDescriptorSet, 1, 2, nullptr, 0);
-
-				for (const RenderableObject& renderable : material.Renderables)
-				{
-					//Set renderable descriptor set
-					pCmdList->SetDescriptorSets((const DescriptorSet**)&renderable.pViewportProjectionDescriptorSet,1,0,nullptr,0);
-					pCmdList->SetDescriptorSets((const DescriptorSet**)&renderable.pModelDescriptorSet, 1, 1, nullptr, 0);
-
-					//Set vertex index buffers
-					const unsigned long long offset = 0;
-					pCmdList->SetVertexBuffers((const GraphicsBuffer**)&renderable.pVertexBuffer, 1, 0,&offset);
-					pCmdList->SetIndexBuffer(renderable.pIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-					//Draw
-					pCmdList->DrawIndexed(renderable.pIndexBuffer->GetSize() / sizeof(unsigned int), 1, 0, 0, 0);
-				}
-			}
-
-			//End dynamic rendering
-			pCmdList->EndDynamicRendering();
-
-			//Post barrier for presenting
-			pCmdList->SetPipelineTextureBarrier(
-				pSwapchain->GetTexture(swapchainImageIndex),
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
-				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
-				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VkDependencyFlags());
-
-			//End cmd
-			pCmdList->End();
-
-			//Submit cmd list
-			pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
-			pCmdFence->Wait();
-			pCmdFence->Reset();
 
 			//Draw GUI
-			pGUIRenderer->StartRendering(0.1f);
-			if (ImGui::Begin("ControlPanel"))
 			{
-				ImGui::SliderFloat("AmbientPower", &lightBuffer.AmbientPower,0.0f,10.0f);
-				ImGui::Separator();
-
-				if (ImGui::CollapsingHeader("Directional Light"))
+				pGUIRenderer->StartRendering(0.1f);
+				if (ImGui::Begin("ControlPanel"))
 				{
-					DirectionalLightProperties& properties = lightBuffer.DirectionalLight;
+					if (ImGui::CollapsingHeader("Ambient"))
+					{
+						ImGui::SliderFloat("AmbientPower", &lightBuffer.AmbientPower, 0.0f, 10.0f);
+					}
 
-					ImGui::SliderFloat3("Pos", &directionalLightPos.x, -50.0f, 50.0f);
-					ImGui::SliderFloat3("Direction", &properties.Direction.x, -1.0f, 1.0f);
-					ImGui::SliderFloat4("Color", &properties.Color.x, 0.0f, 1.0f);
-					ImGui::SliderFloat("Power", &properties.Power, 0.0f, 50.0f);
+					ImGui::Separator();
+					ImGui::Spacing();
+
+					if (ImGui::CollapsingHeader("Directional Light"))
+					{
+						DirectionalLightProperties& properties = lightBuffer.DirectionalLight;
+
+						ImGui::SliderFloat3("Direction", &properties.Direction.x, -1.0f, 1.0f);
+						ImGui::SliderFloat4("Color", &properties.Color.x, 0.0f, 1.0f);
+						ImGui::SliderFloat("Power", &properties.Power, 0.0f, 50.0f);
+						ImGui::Image((ImTextureID)pDirectionalShadowTextureSet, { (float)256,(float)256 });
+					}
+
+					ImGui::Separator();
+					ImGui::Spacing();
+
+					if (ImGui::CollapsingHeader("Spot Light"))
+					{
+						SpotLightProperties& properties = lightBuffer.SpotLight;
+
+						ImGui::SliderFloat3("Pos", &properties.Pos.x, -50, 50);
+						ImGui::SliderFloat3("Direction", &properties.Direction.x, -1.0f, 1.0f);
+						ImGui::SliderFloat4("Color", &properties.Color.x, 0.0f, 1.0f);
+						ImGui::SliderFloat("Power", &properties.Power, 0.0f, 10.0f);
+						ImGui::SliderFloat("Fov", &properties.Fov, 60.10f, 179.0f);
+						ImGui::Image((ImTextureID)pSpotShadowTextureSet, { (float)256,(float)256 });
+					}
+
+					ImGui::Separator();
+					ImGui::Spacing();
+
+					if (ImGui::CollapsingHeader("Camera"))
+					{
+						glm::vec3 rotation = pCamera->GetRotation();
+						ImGui::InputFloat3("Rotation",&rotation.x);
+					}
+					ImGui::End();
 				}
 
-				ImGui::SliderFloat3("Camera", &cameraPosition.x, -20, 20);
+				pGUIRenderer->EndRendering(ppSwapchainTextureViews[swapchainImageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_QUEUE_GRAPHICS_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VkDependencyFlags());
 
-				ImGui::Image((ImTextureID)pDirectionalShadowTextureSet, { (float)256,(float)256 });
+				pCmdList->Begin();
 
-				ImGui::End();
+				//Draw GUI
+				pCmdList->SetPipelineTextureBarrier(
+					pSwapchain->GetTexture(swapchainImageIndex),
+					VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+					VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
+					VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+					VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+					VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+					VkDependencyFlags());
+
+
+				pCmdList->End();
+				pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
+				pCmdFence->Wait();
+				pCmdFence->Reset();
 			}
-			
-			pGUIRenderer->EndRendering(ppSwapchainTextureViews[swapchainImageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,VK_QUEUE_GRAPHICS_BIT,VK_IMAGE_ASPECT_COLOR_BIT,VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VkDependencyFlags());
 
-			pCmdList->Begin();
-
-			//Draw GUI
-			pCmdList->SetPipelineTextureBarrier(
-				pSwapchain->GetTexture(swapchainImageIndex),
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				VK_QUEUE_GRAPHICS_BIT, VK_QUEUE_GRAPHICS_BIT,
-				VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
-				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VkDependencyFlags());
-
-			pCmdList->End();
-			pDevice->SubmitCommandLists(pDefaultGraphicsQueue, (const CommandList**)&pCmdList, 1, nullptr, pCmdFence, nullptr, 0, nullptr, 0);
-			pCmdFence->Wait();
-			pCmdFence->Reset();
+			pLogger->AddEvent("RenderingEnd");
 
 			//Present
+			pLogger->AddEvent("PresentBegin");
 			pSwapchain->Present(swapchainImageIndex);
+			pLogger->AddEvent("PresentEnd");
 
 			bRed = !bRed;
+
+			pLogger->AddEvent("FrameEnd");
 		}
+
+		//Dump logs
+		pLogger->DumpLogs();
 	}
 }
 int main(const unsigned int argumentCount, const char** ppArguments)
 {
-	Oksijen::Run();
+	Oksijen::Run(ppArguments[0]);
 	return 0;
 }

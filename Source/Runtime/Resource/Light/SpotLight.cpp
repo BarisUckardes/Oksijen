@@ -1,29 +1,37 @@
-#include "DirectionalLight.h"
+#include "SpotLight.h"
 
 namespace Oksijen
 {
-	DirectionalLight::DirectionalLight(GraphicsDevice* pDevice, GraphicsMemory* pMemory, const unsigned int width, const unsigned int height,const VkFormat format)
-		: mDevice(pDevice), mShadowTexture(nullptr), mShadowTextureView(nullptr),mDirection({1.0f,-1.0f,1.0f}),mColor({1.0f,1.0f,1.0f}),mFormat(format), mWidth(width), mHeight(height), mPower(1.0f)
+	SpotLight::SpotLight(GraphicsDevice* pDevice, GraphicsMemory* pMemory, const unsigned int width, const unsigned int height, const VkFormat format) :
+		mDevice(pDevice), mShadowTexture(nullptr), mShadowTextureView(nullptr),mPosition(glm::vec3(0.0f)), mDirection({1.0f,-1.0f,1.0f}), mColor({1.0f,1.0f,1.0f}),mFieldOfView(60.0f), mFormat(format), mWidth(width), mHeight(height), mPower(1.0f)
 	{
 		Resize(pMemory, width, height);
 	}
-	DirectionalLight::~DirectionalLight()
+	SpotLight::~SpotLight()
 	{
 		ClearResources();
 	}
-	void DirectionalLight::SetDirection(const glm::vec3& direction)
+	void SpotLight::SetPosition(const glm::vec3& pos)
+	{
+		mPosition = pos;
+	}
+	void SpotLight::SetDirection(const glm::vec3& direction)
 	{
 		mDirection = direction;
 	}
-	void DirectionalLight::SetPower(const float power)
-	{
-		mPower = power;
-	}
-	void DirectionalLight::SetColor(const glm::vec3& color)
+	void SpotLight::SetColor(const glm::vec3& color)
 	{
 		mColor = color;
 	}
-	void DirectionalLight::Resize(GraphicsMemory* pMemory,const unsigned int width, const unsigned int height)
+	void SpotLight::SetFieldOfView(const float fov)
+	{
+		mFieldOfView = fov;
+	}
+	void SpotLight::SetPower(const float power)
+	{
+		mPower = power;
+	}
+	void SpotLight::Resize(GraphicsMemory* pMemory, const unsigned int width, const unsigned int height)
 	{
 		//Clear former resources
 		ClearResources();
@@ -41,7 +49,7 @@ namespace Oksijen
 		};
 		mShadowTextureView = mDevice->CreateTextureView(mShadowTexture, 0, 0, VK_IMAGE_VIEW_TYPE_2D, mFormat, mapping, VK_IMAGE_ASPECT_DEPTH_BIT);
 	}
-	void DirectionalLight::ClearResources()
+	void SpotLight::ClearResources()
 	{
 		if (mShadowTexture != nullptr)
 		{

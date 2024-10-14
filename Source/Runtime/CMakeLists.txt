@@ -25,13 +25,13 @@ FetchContent_MakeAvailable(glm)
 # ---------------------- FILE ADDITION -----------------------
 file(GLOB_RECURSE SUBDIRECTORIES "${CMAKE_SOURCE_DIR}/Source/Runtime/*.cpp" "${CMAKE_SOURCE_DIR}/Source/Runtime/*.h")
 source_group(TREE "${CMAKE_SOURCE_DIR}/Source/Runtime" FILES ${SUBDIRECTORIES})
-add_library(Runtime STATIC main.cpp ${SUBDIRECTORIES})
+add_library(Runtime STATIC main.cpp ${SUBDIRECTORIES} "Logger/Logger.cpp" "Logger/Logger.h")
 # ------------------------------------------------------------
 
 # ---------------------- IMGUI FILES -------------------------
 file(GLOB IMGUI_FILES "${imgui_SOURCE_DIR}/*.cpp" "${imgui_SOURCE_DIR}/*.h")
 source_group(TREE "${imgui_SOURCE_DIR}" FILES ${IMGUI_FILES})
-add_library(imgui STATIC ${IMGUI_FILES})
+add_library(imgui STATIC ${IMGUI_FILES} "Logger/Logger.cpp" "Logger/Logger.h")
 # ------------------------------------------------------------
 
 # ------------------- INCLUDE DIRECTORIES --------------------

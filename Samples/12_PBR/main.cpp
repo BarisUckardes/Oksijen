@@ -14,7 +14,7 @@
 #include <glm/vec3.hpp>
 #include <glm/matrix.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <Runtime/Mesh/MeshLoader.h>
+#include <Runtime/Resource/Mesh/MeshLoader.h>
 #include <Runtime/ImGui/ImGuiRenderer.h>
 
 namespace Oksijen
